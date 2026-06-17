@@ -26,11 +26,31 @@ from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
 from mcp import StdioServerParameters
 from google.adk.agents.callback_context import CallbackContext
 from google.genai import types
+from a2a.types import AgentCard
+
+# Load local environment variables from .env file if present
+possible_env_paths = [
+    ".env",
+    "../.env",
+    os.path.join(os.path.dirname(__file__), "..", ".env"),
+]
+for env_path in possible_env_paths:
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ[k.strip()] = v.strip()
+            break
+        except Exception:
+            pass
 
 # Set up GCP and Vertex AI environment variables
 _, project_id = google.auth.default()
-os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project_id)
+os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
 # Configure logging
@@ -121,10 +141,22 @@ agent_card_path = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "logistics_agent_card.json")
 )
 
+# Load the JSON and override the connection URL dynamically from environment
+with open(agent_card_path, "r", encoding="utf-8") as f:
+    card_data = json.load(f)
+
+# Override with private logistics URL from .env securely
+env_url = os.getenv("LOGISTICS_AGENT_URL")
+if env_url:
+    card_data["url"] = env_url
+    logger.info("URL de conexión del agente de logística cargada de forma segura desde .env.")
+else:
+    logger.warning("No se encontró LOGISTICS_AGENT_URL en el entorno. Se usará el valor por defecto del Card.")
+
 # Instantiate the RemoteA2aAgent using Google ADK native A2A support
 remote_logistics_agent = RemoteA2aAgent(
     name="logistics_agent",
-    agent_card=agent_card_path,
+    agent_card=AgentCard(**card_data), # Pass instantiated AgentCard object directly
     description="Agente remoto de logística marítima capaz de rastrear contenedores específicos por ID (track_by_id) y realizar consultas complejas sobre la flota, rutas y retrasos en BigQuery (query_logistics).",
 )
 
