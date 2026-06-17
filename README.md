@@ -16,6 +16,38 @@ Agente inteligente orquestador de cadena de suministro basado en ReAct utilizand
 
 ---
 
+## 🗺️ Diagrama de Arquitectura del Agente
+
+A continuación se muestra el flujo de orquestación técnica que realiza el agente `factory_planner` utilizando **Google ADK 2.1.0** para validar el lote de producción:
+
+```mermaid
+graph TD
+    User([👤 Usuario / Gemini Enterprise]) -->|1. Consulta Viabilidad| RootAgent[🤖 Agente Planificador de Fábrica<br>factory_planner]
+    
+    subgraph Inicialización y Habilidades
+        RootAgent -->|Carga de Skills| SkillsDir[(📂 skills/<br>Habilidades en Markdown)]
+    end
+    
+    subgraph Orquestación y Herramientas
+        RootAgent -->|2. Escanea Flota| LocalFile[📄 read_production_schedule<br>production_schedule.json]
+        
+        RootAgent -->|3. Llama por A2A| A2A_Tool[🌐 AgentTool]
+        A2A_Tool -->|Protocolo A2A| RemoteLogistics[🚚 Agente de Logística<br>LogisticsFix en Cloud Run]
+        RemoteLogistics -->| track_by_id | BQ[(📊 BigQuery<br>dev_dataset.containers)]
+        
+        RootAgent -->|4. Consulta Clima| MCP_Tool[⚡ weather_mcp_toolset]
+        MCP_Tool -->|Stdio JSON-RPC| WeatherServer[🌦️ MCP Weather Server<br>Node.js stdio]
+        WeatherServer -->|API Fetch| Wttr[🌍 wttr.in Live API]
+        
+        RootAgent -->|5. Guarda Reporte| WriterTool[💾 save_markdown_report]
+        WriterTool -->|Escribe Markdown| ReportsFolder[(📂 reports/<br>reporte_clima_puerto.md)]
+    end
+    
+    RootAgent -->|6. Respuesta y Previsualización| User
+```
+
+---
+
 ## Estructura del Proyecto
 
 ```
@@ -25,6 +57,8 @@ factory-planner/
 │   ├── agent_runtime_app.py      # Envoltorio del agente para Agent Runtime de GCP
 │   ├── logistics_agent_card.json # Agent Card del servicio remoto de Logística A2A
 │   └── app_utils/               # Utilidades de telemetría y tipado del ADK
+├── skills/                   # Directorio de Habilidades (Skills) Dinámicas en Markdown
+│   └── weather_report_skill.md  # Instrucciones expertas para generación de reportes climáticos
 ├── weather-server/           # Servidor MCP de Clima Real (Node.js stdio)
 │   └── index.js                 # Manejador JSON-RPC 2.0 y consultas HTTP a wttr.in
 ├── tests/                    # Pruebas unitarias, integración y evaluación
@@ -34,6 +68,20 @@ factory-planner/
 ├── production_schedule.json  # Datos locales de contenedores activos
 └── pyproject.toml            # Dependencias del proyecto Python
 ```
+
+---
+
+## 💡 Arquitectura de Skills Modulares (Habilidades Dinámicas)
+
+Para mostrar las posibilidades completas de **Google ADK**, este proyecto implementa una arquitectura avanzada de **Skills Modulares** inspirada en las habilidades de agentes expertos de Gemini:
+
+*   **¿Cómo funciona?** Al arrancar el agente, una función dinámica en `app/agent.py` escanea recursivamente el directorio `skills/` y lee de forma automática cualquier archivo `.md` (Markdown). Estas directivas de nivel experto son inyectadas limpiamente como parte del prompt del sistema del agente (`instruction`).
+*   **Modularidad sin código:** Esto te permite arrastrar, renombrar, añadir o remover habilidades completas simplemente gestionando archivos `.md` en la carpeta `skills/` sin tener que alterar una sola línea del código de Python del agente.
+
+### Habilidades Incluidas:
+1.  **Habilidad de Reportes Climáticos Marítimos Profesionales (`skills/weather_report_skill.md`):**
+    *   **Propósito:** Enseña al agente el protocolo estricto y la estructura visual para redactar reportes climáticos profesionales en formato Markdown cuando el usuario le pide evaluar el clima o dar recomendaciones.
+    *   **Acción Física:** Enseña al agente cómo interactuar de forma segura con la herramienta de infraestructura de disco `save_markdown_report` para persistir físicamente los reportes en un directorio local llamado `reports/` (ej: `reports/reporte_clima_buenos_aires.md`), ofreciendo al usuario una previsualización atractiva en el chat de su ejecución.
 
 ---
 
