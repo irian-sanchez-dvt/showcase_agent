@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from app.agent import read_production_schedule, remote_logistics_agent
+from app.agent import read_production_schedule, remote_logistics_agent, save_markdown_report
 
 
 def test_read_production_schedule() -> None:
@@ -38,3 +38,25 @@ def test_remote_logistics_agent_initialization() -> None:
         os.path.join(os.path.dirname(__file__), "..", "..", "app", "logistics_agent_card.json")
     )
     assert os.path.exists(card_path)
+
+
+def test_save_markdown_report() -> None:
+    """Tests that the generic file-writer save_markdown_report correctly persists reports in reports/."""
+    test_filename = "test_climate_report.md"
+    test_content = "# Test Climate Report\n\nThis is a sample test report."
+    
+    result = save_markdown_report(test_filename, test_content)
+    assert result["status"] == "success"
+    assert "test_climate_report.md" in result["filename"]
+    assert os.path.exists(result["filepath"])
+    
+    # Verify contents written are identical
+    with open(result["filepath"], "r", encoding="utf-8") as f:
+        written_content = f.read()
+    assert written_content == test_content
+    
+    # Cleanup test file
+    try:
+        os.remove(result["filepath"])
+    except Exception:
+        pass

@@ -38,6 +38,50 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("factory-planner")
 
 # ---------------------------------------------------------------------------
+# 0. DINAMIC LOCAL SKILL LOADER
+# ---------------------------------------------------------------------------
+def load_local_skills() -> str:
+    """Escanea la carpeta de skills/ y lee todas las guías de habilidades en Markdown
+
+    para inyectarlas dinámicamente en el prompt del sistema al arrancar el agente.
+    """
+    possible_paths = [
+        "skills",
+        "../skills",
+        os.path.join(os.path.dirname(__file__), "..", "skills"),
+        os.path.join(os.path.dirname(__file__), "skills"),
+    ]
+    
+    skills_dir = None
+    for path in possible_paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            skills_dir = path
+            break
+            
+    if not skills_dir:
+        logger.warning("No se encontró la carpeta 'skills/' en las rutas preconfiguradas.")
+        return ""
+        
+    skills_content = []
+    try:
+        for filename in os.listdir(skills_dir):
+            if filename.endswith(".md"):
+                filepath = os.path.join(skills_dir, filename)
+                with open(filepath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    skills_content.append(
+                        f"\n\n--- HABILIDAD ADQUIRIDA: {filename} ---\n{content}\n"
+                    )
+        logger.info(f"Cargadas con éxito {len(skills_content)} habilidades desde '{skills_dir}'.")
+    except Exception as e:
+        logger.error(f"Fallo al cargar habilidades dinámicas: {str(e)}")
+        
+    if skills_content:
+        return "\n\n=== MANUAL DE HABILIDADES ADQUIRIDAS (SISTEMA DE SKILLS) ===\n" + "".join(skills_content)
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # 1. LOCAL FLEET SCHEDULE SKILL (read_production_schedule)
 # ---------------------------------------------------------------------------
 def read_production_schedule() -> dict:
@@ -106,7 +150,45 @@ weather_mcp_toolset = McpToolset(
 
 
 # ---------------------------------------------------------------------------
-# 4. CALLBACKS FOR OBSERVABILITY & SESSION STATE
+# 4. GENERIC DISK INFRASTRUCTURE TOOL (save_markdown_report)
+# ---------------------------------------------------------------------------
+def save_markdown_report(filename: str, content: str) -> dict:
+    """Guarda un reporte o archivo de texto formateado en el disco local dentro del directorio 'reports/'.
+
+    Args:
+        filename: El nombre del archivo a crear o guardar (ej: 'reports/reporte_clima_bilbao.md').
+        content: El contenido de texto completo formateado en Markdown que se escribirá en el archivo.
+
+    Returns:
+        dict: El estado de la operación y la ruta absoluta del archivo guardado.
+    """
+    try:
+        # Forzar guardado seguro en la carpeta reports/ para evitar path traversal
+        clean_name = os.path.basename(filename)
+        reports_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "reports")
+        )
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        filepath = os.path.join(reports_dir, clean_name)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+            
+        return {
+            "status": "success",
+            "message": "Reporte climático guardado exitosamente en disco.",
+            "filepath": filepath,
+            "filename": clean_name
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Fallo al escribir el reporte en el disco: {str(e)}"
+        }
+
+
+# ---------------------------------------------------------------------------
+# 5. CALLBACKS FOR OBSERVABILITY & SESSION STATE
 # ---------------------------------------------------------------------------
 async def init_session_state(callback_context: CallbackContext, **kwargs) -> None:
     """Callback triggered before agent execution to initialize and maintain session-level context."""
@@ -130,8 +212,25 @@ async def after_tool_call(tool, args: dict, tool_context, tool_response, **kwarg
 
 
 # ---------------------------------------------------------------------------
-# 5. AGENT DEFINITION
+# 6. AGENT DEFINITION
 # ---------------------------------------------------------------------------
+base_instruction = """Eres un planificador de fábrica experto. Tu misión es validar si un lote de producción puede iniciarse.
+
+Para lograr esto, debes seguir este procedimiento paso a paso de forma rigurosa:
+1. Utiliza la herramienta `read_production_schedule` para buscar el contenedor solicitado en el cronograma local.
+2. **Lógica de Búsqueda de Contenedor:**
+   - **Si encuentras el contenedor en el cronograma local:** identifica su puerto de origen (o 'pol'). Luego, consulta el clima de dicho puerto utilizando la herramienta MCP `get_port_weather` para evaluar riesgos de transporte. También debes llamar a la herramienta `logistics_agent` (pasando el ID en el parámetro `request`, ej: `logistics_agent(request="CMDU4651065")`) para obtener su contenido y estado de aduanas.
+   - **Si NO encuentras el contenedor en el cronograma local:** no te detengas. Llama de inmediato a la herramienta `logistics_agent` pasando el ID del contenedor como argumento del parámetro `request` (ej: `logistics_agent(request="CMDU4651065")` o `logistics_agent(request="Rastrea el ID CMDU4651065")`) para que el agente remoto busque el contenedor en su base de datos global. Si el agente remoto responde con los detalles y el puerto de origen (pol), consulta el clima de ese puerto con la herramienta MCP `get_port_weather`.
+3. Genera una recomendación final muy detallada en español sobre si el lote de producción puede iniciarse o si debe ser demorado, basándote exactamente en la información recolectada de las herramientas anteriores. Justifica tu decisión con los datos obtenidos.
+
+**Regla de Seguridad Crítica:**
+No inventes datos bajo ninguna circunstancia. Si el contenedor no está en el cronograma local ni el agente de logística tiene registro de él (es decir, la herramienta `logistics_agent` no devuelve datos válidos o indica que no existe), indica que no es posible iniciar el lote de producción por falta de información y detalla qué herramientas consultaste.
+"""
+
+# Load local skills dynamically from skills/ directory
+dynamic_skills = load_local_skills()
+final_instruction = base_instruction + dynamic_skills
+
 root_agent = Agent(
     name="factory_planner",
     model=Gemini(
@@ -139,21 +238,12 @@ root_agent = Agent(
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     description="Planificador de fábrica experto que valida si un lote de producción puede iniciarse. Cruza datos de cronogramas locales de flota, clima real de puertos mediante MCP, y consulta detalles de carga vía protocolo A2A.",
-    instruction="""Eres un planificador de fábrica experto. Tu misión es validar si un lote de producción puede iniciarse.
-
-Para lograr esto, debes seguir este procedimiento paso a paso de forma rigurosa:
-1. Utiliza la herramienta `read_production_schedule` para saber qué contenedores están en flota, sus estados y de dónde vienen (puerto de origen o 'pol').
-2. Para los contenedores que necesites validar, consulta el clima del puerto de origen utilizando la herramienta MCP `get_port_weather` para evaluar si existen riesgos de transporte debido a clima severo o adverso.
-3. Consulta los detalles de logística, contenido de la carga y aduana llamando al agente de logística remoto mediante la herramienta `logistics_agent` (que expone skills como `track_by_id` para buscar por ID y `query_logistics` para BigQuery).
-4. Genera una recomendación final muy detallada en español sobre si el lote de producción puede iniciarse o si debe ser demorado, basándote exactamente en la combinación de los tres puntos anteriores. Justifica tu decisión con los datos obtenidos.
-
-**Regla de Seguridad Crítica:**
-No inventes datos bajo ninguna circunstancia. Si alguna de las herramientas falla o no devuelve información, indica que no es posible emitir una recomendación completa debido a la falta de datos y detalla exactamente qué herramienta falló.
-""",
+    instruction=final_instruction,
     tools=[
         read_production_schedule,
         AgentTool(remote_logistics_agent),
         weather_mcp_toolset,
+        save_markdown_report,  # Herramienta de infraestructura genérica requerida por la habilidad climática para persistir los reportes Markdown en disco
     ],
     before_agent_callback=init_session_state,
     before_tool_callback=before_tool_call,
@@ -161,7 +251,7 @@ No inventes datos bajo ninguna circunstancia. Si alguna de las herramientas fall
 )
 
 # ---------------------------------------------------------------------------
-# 6. APP DEFINITION (adkapp pattern)
+# 7. APP DEFINITION (adkapp pattern)
 # ---------------------------------------------------------------------------
 app = App(
     root_agent=root_agent,

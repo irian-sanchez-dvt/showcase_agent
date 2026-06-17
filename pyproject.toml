@@ -6,7 +6,8 @@ authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
 dependencies = [
-    "google-adk>=1.27.0,<2.0.0",
+    "google-adk>=2.0.0,<3.0.0",
+    "mcp>=1.0.0",
     "a2a-sdk~=0.3.22",
     "nest-asyncio>=1.6.0,<2.0.0",
     "google-cloud-aiplatform==1.149.0",
@@ -28,7 +29,7 @@ dev = [
 
 [project.optional-dependencies]
 eval = [
-    "google-adk[eval]>=1.15.0,<2.0.0",
+    "google-adk[eval]>=2.0.0,<3.0.0",
 ]
 lint = [
     "ruff>=0.4.6,<1.0.0",
