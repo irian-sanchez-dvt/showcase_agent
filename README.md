@@ -57,6 +57,7 @@ graph TD
     MCP -->|API Fetch| Wttr[🌍 wttr.in Live API]
 
     RootAgent -->|6. Respuesta| User
+```
 
 ---
 
