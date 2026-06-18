@@ -18,16 +18,16 @@ Agente inteligente orquestador de cadena de suministro basado en ReAct utilizand
 
 ## 🔌 Detalle del Servidor MCP: Envolviendo la Web para el LLM
 
-En la industria de Inteligencia Artificial, un **servidor MCP** se define fundamentalmente como un **"wrapper" (envolvedor) de APIs o Webs**. Este proyecto implementa un servidor MCP real en **Node.js** que envuelve la API meteorológica global de **wttr.in** y la traduce al estándar abierto de comunicación JSON-RPC 2.0.
+En este caso, el **servidor MCP** se ha definido como un **"wrapper" (envolvedor) de APIs o Webs**. Este proyecto implementa un servidor MCP real en **Node.js** que envuelve la API meteorológica global de **wttr.in** y la traduce al estándar abierto de comunicación JSON-RPC 2.0.
 
 ### ¿Por qué Gemini necesita que hagamos este Wrapper (MCP)?
-Un modelo de lenguaje de última generación (como Gemini 2.5 Flash) es extremadamente inteligente, pero tiene limitaciones físicas en producción:
-1.  **Sin navegación libre:** El LLM no puede navegar por internet de forma autónoma para buscar el clima.
+Un modelo de lenguaje (como Gemini 2.5 Flash) es inteligente pero tiene limitaciones físicas en producción:
+1.  **Sin navegación libre:** No queremos que navegue por internet de forma autónoma para buscar el clima pues podría alucinar y/o incurrir en un gasto de tokens superfluo.
 2.  **Saturación de Contexto:** Las APIs meteorológicas devuelven JSONs enormes con miles de líneas de datos brutos. Enviar todo ese JSON al LLM desperdicia tokens y ralentiza la respuesta. El MCP filtra la información y envía solo los parámetros clave (Temperatura, Viento, Humedad).
 3.  **Lógica y Fórmulas Locales:** El LLM no sabe calcular de forma determinista si una racha de viento de 45 km/h representa un peligro alto para un buque portacontenedores. **Nuestro servidor MCP de Node.js procesa las métricas reales y calcula el nivel de riesgo de transporte de forma matemática**, entregándole al LLM el resultado ya masticado (`LOW`, `MEDIUM`, `HIGH`).
 
 ### Los Tres Archivos de la Ingeniería MCP en el Proyecto:
-1.  **La Declaración (`mcp_config.json`):** El manifiesto en la raíz del proyecto que le indica a la ADK que debe levantar el subproceso de Node en segundo plano:
+1.  **La Declaración (`mcp_config.json`):** El manifiesto en la raíz del proyecto que le indica a la ADK que debe levantar el subproceso de Node en Cloud Run:
     ```json
     "weather-server": { "command": "node", "args": [".../weather-server/index.js"] }
     ```
@@ -75,8 +75,8 @@ factory-planner/
 │   └── index.js                 # Manejador JSON-RPC 2.0 y consultas HTTP a wttr.in
 ├── tests/                    # Pruebas unitarias, integración y evaluación
 ├── DEPLOY_GCP.md             # Guía detallada para despliegue y registro en GCP
-├── GEMINI.md                 # Guía para el agente de desarrollo de IA (Gemini CLI)
-├── mcp_config.json           # Configuración del servidor MCP local
+├── GEMINI.md                 # Guía para el agente de desarrollo de IA (Gemini CLI/Antigravity)
+├── mcp_config.json           # Configuración del servidor MCP 
 ├── production_schedule.json  # Datos locales de contenedores activos
 └── pyproject.toml            # Dependencias del proyecto Python
 ```
@@ -89,7 +89,7 @@ Para demostrar las capacidades completas de **Google ADK 2.1.0** en entornos de 
 
 *   **Habilidades Dinámicas desde Google Cloud Storage (GCS):**
     *   Los manuales de habilidades (como `skills/weather_report_skill.md`) se almacenan de forma segura en el bucket **`gs://dvt-sp-agentspace-factory-skills`**.
-    *   **Lazy Loading asíncrono:** Al iniciar la conversación, el agente realiza una importación tardía diferida para descargar las habilidades de GCS en memoria de forma segura dentro del event loop de FastAPI. Esto previene hilos residuales y elimina por completo los crashes de `NoEventLoopError` en el Reasoning Engine de Google Cloud (que corre sobre Python 3.14).
+    *   **Lazy Loading asíncrono:** Al iniciar la conversación, el agente realiza una importación tardía diferida para descargar las habilidades de GCS en memoria de forma segura dentro del event loop de FastAPI.
 *   **Cronograma de Flota Dinámico en la Nube:**
     *   La base de datos de contenedores activos se lee directamente desde **`gs://dvt-sp-agentspace-factory-skills/production_schedule.json`**.
     *   **¡Súper dinámico!:** Puedes actualizar los barcos o puertos editando directamente el JSON en el bucket de GCS, y el agente en producción leerá los cambios de inmediato sin tener que realizar ningún despliegue de código.
