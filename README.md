@@ -103,6 +103,25 @@ Para demostrar las capacidades completas de **Google ADK 2.1.0** en entornos de 
 
 ---
 
+## 📡 Modo Offline / Local-First (Cero Configuración para Pruebas Rápidas)
+
+Este proyecto está diseñado para ser **Local-First**, permitiendo a cualquier desarrollador o probador ejecutar y validar todo el comportamiento del agente de forma **100% local y offline**, sin necesidad de configurar credenciales de Google Cloud ni instalar dependencias externas.
+
+### ¿Cómo activarlo?
+Simplemente configura la siguiente variable en tu archivo `.env`:
+```env
+OFFLINE_MODE=true
+```
+
+### ¿Qué hace el Modo Offline tras bambalinas?
+Cuando esta variable es `true`, el agente inteligente de Python activa un protocolo de contingencia local:
+1.  **Skills e Instrucciones locales:** En lugar de intentar conectarse a internet para descargar las habilidades de GCS, las lee de forma instantánea y local desde la carpeta `skills/`.
+2.  **Cronogramas Locales:** Bypassea GCS y lee el cronograma de barcos directamente desde el archivo local `production_schedule.json`.
+3.  **Simulación Climática Determinista:** El agente no requiere el microservicio de Cloud Run ni genera tokens de GCP. Consulta de forma interna un diccionario meteorológico local de alta fidelidad, respondiendo con el clima y el riesgo físico exacto al instante.
+4.  **Guardado Local:** Omite la subida a internet y guarda el informe Markdown físico en tu disco local dentro de la carpeta `reports/`.
+
+---
+
 ## Requisitos Previos
 
 Antes de comenzar, asegúrate de tener instalado:

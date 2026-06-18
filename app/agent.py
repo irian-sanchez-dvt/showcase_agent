@@ -56,16 +56,16 @@ os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("factory-planner")
 
-from google.cloud import storage
+# Detect OFFLINE_MODE
+IS_OFFLINE = os.getenv("OFFLINE_MODE", "false").lower() == "true"
+if IS_OFFLINE:
+    logger.info("📡 [MODO OFFLINE ACTIVADO] El agente se ejecutará en modo Local-First sin conectar a GCP.")
 
 # ---------------------------------------------------------------------------
 # 0. DINAMIC LOCAL & REMOTE SKILL LOADER
 # ---------------------------------------------------------------------------
 def load_local_skills() -> str:
-    """Escanea la carpeta local de skills/ y lee todas las guías de habilidades en Markdown
-
-    como fallback offline si GCS no está disponible.
-    """
+    """Escanea la carpeta local de skills/ y lee todas las guías de habilidades en Markdown."""
     possible_paths = [
         "skills",
         "../skills",
@@ -80,7 +80,7 @@ def load_local_skills() -> str:
             break
             
     if not skills_dir:
-        logger.warning("No se encontró la carpeta local 'skills/' para el fallback offline.")
+        logger.warning("No se encontró la carpeta local 'skills/' para cargar habilidades.")
         return ""
         
     skills_content = []
@@ -93,7 +93,7 @@ def load_local_skills() -> str:
                     skills_content.append(
                         f"\n\n--- HABILIDAD ADQUIRIDA (FALLBACK LOCAL): {filename} ---\n{content}\n"
                     )
-        logger.info(f"Cargadas con éxito {len(skills_content)} habilidades locales para fallback.")
+        logger.info(f"Cargadas con éxito {len(skills_content)} habilidades locales.")
     except Exception as e:
         logger.error(f"Fallo al cargar habilidades locales de fallback: {str(e)}")
         
@@ -103,13 +103,18 @@ def load_local_skills() -> str:
 
 
 def load_gcs_skills() -> str:
-    """Escanea el bucket de GCS 'dvt-sp-agentspace-factory-skills' y descarga todos los archivos .md
+    """Escanea el bucket de GCS y descarga todos los archivos .md
 
     de habilidades para inyectarlos dinámicamente en el prompt del sistema.
+    Bypassa GCS si OFFLINE_MODE está activo.
     """
+    if IS_OFFLINE:
+        logger.info("Bypasseando descarga de GCS (Modo Offline). Cargando habilidades locales...")
+        return load_local_skills()
+
     try:
         from google.cloud import storage
-        bucket_name = "dvt-sp-agentspace-factory-skills"
+        bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
         skills_content = []
         
         storage_client = storage.Client()
@@ -138,9 +143,12 @@ def load_gcs_skills() -> str:
 def load_gcs_config() -> dict:
     """Descarga de forma segura el archivo 'config.json' desde GCS para recuperar
 
-    las variables de entorno de producción (como la URL de logística).
+    las variables de entorno de producción. Bypassa GCS si OFFLINE_MODE está activo.
     """
-    bucket_name = "dvt-sp-agentspace-factory-skills"
+    if IS_OFFLINE:
+        return {}
+
+    bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
     blob_name = "config.json"
     
     try:
@@ -161,44 +169,43 @@ def load_gcs_config() -> dict:
 # 1. LOCAL & REMOTE FLEET SCHEDULE SKILL (read_production_schedule)
 # ---------------------------------------------------------------------------
 def read_production_schedule() -> dict:
-    """Consulta la flota activa de contenedores y sus cronogramas de arribo desde la base en Google Cloud Storage.
+    """Consulta la flota activa de contenedores y sus cronogramas de arribo.
 
-    Busca dinámicamente el archivo 'production_schedule.json' en el bucket de GCS
-    para evaluar qué contenedores están en tránsito, sus transportistas, puertos y estados.
+    En modo online lee de GCS; en modo offline de forma inmediata lee del disco local.
 
     Returns:
         dict: Un diccionario JSON con el estado de la operación y el listado de contenedores en la flota.
     """
-    bucket_name = "dvt-sp-agentspace-factory-skills"
-    blob_name = "production_schedule.json"
-    
-    # 1. Intento de cargar dinámicamente desde GCS en la nube
-    try:
-        from google.cloud import storage
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(blob_name)
-        if blob.exists():
-            data_text = blob.download_as_text(encoding="utf-8")
-            data = json.loads(data_text)
-            logger.info("Cronograma de producción leído con éxito directamente de Google Cloud Storage (GCS).")
-            return {"status": "success", "containers": data, "source": "GCS"}
-    except Exception as e:
-        logger.warning(f"No se pudo leer el cronograma desde GCS: {e}. Activando fallback local.")
-
-    # 2. Fallback local offline de resiliencia
+    if not IS_OFFLINE:
+        bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
+        blob_name = "production_schedule.json"
+        
+        # Intento de cargar dinámicamente desde GCS en la nube
+        try:
+            from google.cloud import storage
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+            if blob.exists():
+                data_text = blob.download_as_text(encoding="utf-8")
+                return {"status": "success", "containers": json.loads(data_text), "source": "GCS"}
+        except Exception as e:
+            logger.error(f"Fallo al leer archivo de cronograma en GCS: {str(e)}")
+        
+    # Fallback local / Modo Offline directo
     possible_paths = [
         "production_schedule.json",
         "../production_schedule.json",
         os.path.join(os.path.dirname(__file__), "..", "production_schedule.json"),
         os.path.join(os.path.dirname(__file__), "production_schedule.json"),
     ]
+    
     for path in possible_paths:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    logger.info("Cronograma de producción leído del disco local (Fallback offline).")
+                    logger.info("Cronograma de producción leído del disco local (Modo Local/Fallback).")
                     return {"status": "success", "containers": data, "source": "local"}
             except Exception:
                 pass
@@ -273,6 +280,39 @@ def get_port_weather(port: str) -> str:
     Returns:
         str: El reporte meteorológico detallado en castellano y el nivel de riesgo de transporte terrestre/marítimo.
     """
+    fallback_offline_data = {
+      "buenos aires, ar": { "weather": "Sunny, calm seas.", "risk": "LOW" },
+      "bilbao, es": { "weather": "Severe storm, gale-force winds, heavy swells.", "risk": "HIGH" },
+      "felixstowe, uk": { "weather": "Dense fog, restricted visibility.", "risk": "MEDIUM" },
+      "jeddah, sa": { "weather": "Sunny, high temperatures, calm seas.", "risk": "LOW" },
+      "busan, kr": { "weather": "Partly cloudy, light breeze.", "risk": "LOW" },
+      "noumea, nc": { "weather": "Tropical depression nearby, rough seas, windy.", "risk": "MEDIUM" },
+      "callao, pe": { "weather": "Clear sky, moderate currents.", "risk": "LOW" },
+      "tangier, ma": { "weather": "Clear, mild winds.", "risk": "LOW" },
+      "vancouver, ca": { "weather": "Heavy rainfall and strong offshore winds.", "risk": "HIGH" }
+    }
+
+    # 1. Si OFFLINE_MODE es true, consultamos de forma 100% local sin red
+    if IS_OFFLINE:
+        logger.info("📡 [MODO OFFLINE] Resolviendo el clima del puerto localmente...")
+        # Intento de llamar a un servidor Node local ejecutándose en el puerto 3000
+        try:
+            response = requests.post("http://localhost:3000/get_port_weather", json={"port": port}, timeout=2)
+            if response.status_code == 200:
+                return response.json().get("text", "No se pudo recuperar el reporte local.")
+        except Exception:
+            pass
+            
+        # Fallback instantáneo en Python puro si no hay servidor local corriendo (Demo Blindada)
+        clean_key = port.lower().strip()
+        matched_info = { "weather": "Partly cloudy, calm seas.", "risk": "LOW" }
+        for k, val in fallback_offline_data.items():
+            if k in clean_key or clean_key in k:
+                matched_info = val
+                break
+        return f"Port Location: {port}. [OFFLINE MOCK DATA] {matched_info['weather']} Transport risk evaluation is: {matched_info['risk']}."
+
+    # 2. Modo Producción Remoto en la Nube (Cloud Run)
     mcp_audience = "https://weather-mcp-server-239233954615.europe-west1.run.app"
     mcp_url = f"{mcp_audience}/get_port_weather"
     
@@ -305,7 +345,6 @@ def save_markdown_report(filename: str, content: str) -> dict:
     Returns:
         dict: El estado de la operación, la ruta del archivo local y el enlace de descarga en GCS.
     """
-    bucket_name = "dvt-sp-agentspace-factory-skills"
     clean_name = os.path.basename(filename)
     
     # 1. Guardado Local (Consistencia y Testing)
@@ -314,6 +353,7 @@ def save_markdown_report(filename: str, content: str) -> dict:
             os.path.join(os.path.dirname(__file__), "..", "reports")
         )
         os.makedirs(reports_dir, exist_ok=True)
+        
         filepath = os.path.join(reports_dir, clean_name)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
@@ -321,9 +361,21 @@ def save_markdown_report(filename: str, content: str) -> dict:
         logger.warning(f"No se pudo guardar localmente el reporte: {e}")
         filepath = "local_save_failed"
 
-    # 2. Subida a Google Cloud Storage con Generación de Enlace de Descarga
+    # 2. Si estamos en modo offline, omitimos subir a GCS y retornamos de inmediato éxito local
+    if IS_OFFLINE:
+        logger.info("📡 [MODO OFFLINE] Reporte climático guardado localmente con éxito.")
+        return {
+            "status": "success",
+            "message": "Reporte climático guardado con éxito en disco local.",
+            "filepath": filepath,
+            "filename": clean_name,
+            "download_url": "No disponible (Modo Local/Offline)"
+        }
+
+    # 3. Subida a Google Cloud Storage con Generación de Enlace de Descarga (Producción)
     try:
         from google.cloud import storage
+        bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
         storage_client = storage.Client()
         bucket = storage_client.bucket(bucket_name)
         
@@ -366,14 +418,14 @@ async def init_session_state(callback_context: CallbackContext, **kwargs) -> Non
     if "current_batch" not in callback_context.state:
         callback_context.state["current_batch"] = None
         
-    # Cargar las skills de GCS de forma diferida (lazy loading) dentro del event loop activo
+    # Cargar las skills de GCS (u offline) de forma diferida (lazy loading) dentro del event loop activo
     # para evitar el error anyio.NoEventLoopError durante el import/inicialización del módulo
     if not hasattr(root_agent, "_gcs_skills_loaded"):
-        logger.info("Iniciando la carga diferida (lazy loading) de habilidades desde GCS...")
+        logger.info("Iniciando la carga diferida (lazy loading) de habilidades...")
         dynamic_skills = load_gcs_skills()
         root_agent.instruction = base_instruction + dynamic_skills
         root_agent._gcs_skills_loaded = True
-        logger.info("Habilidades de GCS inyectadas con éxito en las instrucciones del agente.")
+        logger.info("Habilidades cargadas con éxito e inyectadas en las instrucciones del agente.")
         
     # Cargar y sobrescribir la configuración remota desde GCS en caliente para recuperar
     # la URL real del agente de logística (OIDC/A2A) sin depender de variables .env locales en la nube
@@ -382,7 +434,7 @@ async def init_session_state(callback_context: CallbackContext, **kwargs) -> Non
         logistics_url = gcs_config.get("LOGISTICS_AGENT_URL") or os.getenv("LOGISTICS_AGENT_URL")
         if logistics_url:
             remote_logistics_agent._agent_card.url = logistics_url
-            logger.info(f"URL de conexión A2A de logística inyectada con éxito desde GCS: {logistics_url}")
+            logger.info(f"URL de conexión A2A de logística inyectada con éxito: {logistics_url}")
     except Exception as e:
         logger.error(f"Fallo al inyectar la URL dinámica de logística: {e}")
         

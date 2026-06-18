@@ -9,7 +9,7 @@ Esta guía explica paso a paso cómo desplegar el agente `factory-planner` en **
 1. **Autenticación en GCP:**
    ```bash
    gcloud auth login
-   gcloud config set project dvt-sp-agentspace
+   gcloud config set project <your-gcp-project-id>
    ```
 
 2. **Login en el Agents CLI:**
@@ -29,8 +29,8 @@ agents-cli deploy
 
 ### ¿Qué hace este comando?
 - Empaqueta el código de tu agente en la carpeta `app/`.
-- Lo despliega en **Vertex AI Reasoning Engines (Agent Runtime)** en la región configurada (`eu-west1`).
-- Genera un archivo local llamado `deployment_metadata.json` que almacena el identificador único del recurso (por ejemplo, `projects/dvt-sp-agentspace/locations/eu-west1/reasoningEngines/123456789`).
+- Lo despliega en **Vertex AI Reasoning Engines (Agent Runtime)** en la región configurada (`europe-west1`).
+- Genera un archivo local llamado `deployment_metadata.json` que almacena el identificador único del recurso (por ejemplo, `projects/<your-gcp-project-id>/locations/europe-west1/reasoningEngines/<your-reasoning-engine-id>`).
 
 ---
 
@@ -48,29 +48,30 @@ O de forma directa en tu pipeline de CI/CD:
 
 ```bash
 agents-cli publish gemini-enterprise \
-  --gemini-enterprise-app-id projects/dvt-sp-agentspace/locations/global/collections/default_collection/engines/factory-planner-app \
+  --gemini-enterprise-app-id projects/<your-gcp-project-id>/locations/global/collections/default_collection/engines/gem-ent-irian_<your-app-suffix> \
   --display-name "Planificador de Fábrica" \
   --description "Agente experto en validar viabilidad de lotes de producción cruzando logística A2A, clima MCP y cronogramas." \
-  --registration-type a2a
+  --registration-type adk
 ```
 
 ### ¿Qué skills o herramientas se registrarán?
 Al registrar el agente, Gemini Enterprise expondrá las siguientes habilidades para que otros agentes de la organización o usuarios de Gemini Enterprise puedan invocarlas:
 
-1. **`read_production_schedule`**: Skill de lectura local del cronograma de contenedores activos de la flota (con datos sincronizados de BigQuery).
-2. **`query_logistics_agent`**: Skill de comunicación A2A con el agente de logística en Cloud Run para consultar detalles específicos del contenedor (contenido, peso, aduanas).
-3. **`get_port_weather`**: Skill climática ejecutada a través del servidor MCP sobre Stdio para evaluar riesgos meteorológicos en los puertos de origen.
+1. **`read_production_schedule`**: Skill de lectura dinámica desde GCS del cronograma de contenedores activos de la flota (con datos sincronizados de BigQuery).
+2. **`logistics_agent`**: Skill de comunicación A2A con el agente de logística en Cloud Run para consultar detalles específicos del contenedor (contenido, peso, aduanas).
+3. **`get_port_weather`**: Skill climática de tiempo real ejecutada mediante el microservicio remoto en Cloud Run para evaluar riesgos meteorológicos en los puertos de origen.
+4. **`save_markdown_report`**: Skill de guardado de reportes en Markdown directamente en un bucket de GCS con retorno de enlaces públicos de descarga.
 
 ---
 
 ## Paso 3: Interconexión A2A con el Agente de Logística
 
-Si el agente de logística remoto está desplegado en Cloud Run, puedes configurar su URL en las variables de entorno de tu agente para que la interconexión sea 100% interactiva. 
+Si el agente de logística remoto está desplegado en Cloud Run, puedes configurar su URL en las variables de entorno de tu agente para que la interconexión sea 100% interactiva.
 
 En producción, concede los permisos necesarios para la comunicación entre servicios:
 ```bash
 gcloud run services add-iam-policy-binding logistics-agent-service \
-  --member="serviceAccount:service-<PROJECT_NUMBER>@gcp-sa-discoveryengine.iam.gserviceaccount.com" \
+  --member="serviceAccount:service-<GCP_PROJECT_NUMBER>@gcp-sa-discoveryengine.iam.gserviceaccount.com" \
   --role="roles/run.servicesInvoker" \
-  --region="eu-west1"
+  --region="europe-west1"
 ```
