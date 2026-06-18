@@ -16,35 +16,47 @@ Agente inteligente orquestador de cadena de suministro basado en ReAct utilizand
 
 ---
 
+## 🔌 Detalle del Servidor MCP: Envolviendo la Web para el LLM
+
+En la industria de Inteligencia Artificial, un **servidor MCP** se define fundamentalmente como un **"wrapper" (envolvedor) de APIs o Webs**. Este proyecto implementa un servidor MCP real en **Node.js** que envuelve la API meteorológica global de **wttr.in** y la traduce al estándar abierto de comunicación JSON-RPC 2.0.
+
+### ¿Por qué Gemini necesita que hagamos este Wrapper (MCP)?
+Un modelo de lenguaje de última generación (como Gemini 2.5 Flash) es extremadamente inteligente, pero tiene limitaciones físicas en producción:
+1.  **Sin navegación libre:** El LLM no puede navegar por internet de forma autónoma para buscar el clima.
+2.  **Saturación de Contexto:** Las APIs meteorológicas devuelven JSONs enormes con miles de líneas de datos brutos. Enviar todo ese JSON al LLM desperdicia tokens y ralentiza la respuesta. El MCP filtra la información y envía solo los parámetros clave (Temperatura, Viento, Humedad).
+3.  **Lógica y Fórmulas Locales:** El LLM no sabe calcular de forma determinista si una racha de viento de 45 km/h representa un peligro alto para un buque portacontenedores. **Nuestro servidor MCP de Node.js procesa las métricas reales y calcula el nivel de riesgo de transporte de forma matemática**, entregándole al LLM el resultado ya masticado (`LOW`, `MEDIUM`, `HIGH`).
+
+### Los Tres Archivos de la Ingeniería MCP en el Proyecto:
+1.  **La Declaración (`mcp_config.json`):** El manifiesto en la raíz del proyecto que le indica a la ADK que debe levantar el subproceso de Node en segundo plano:
+    ```json
+    "weather-server": { "command": "node", "args": [".../weather-server/index.js"] }
+    ```
+2.  **El Wrapper de Node.js (`weather-server/index.js`):** Escucha las peticiones por stdio utilizando JSON-RPC 2.0, realiza la petición HTTP real de red a `wttr.in` en tiempo real, clasifica el riesgo usando métricas meteorológicas en vivo, y cuenta con un fallback local resiliente en caso de desconexión.
+3.  **La Inyección de Habilidad en Python (`app/agent.py`):** Utiliza la clase `McpToolset` de Google ADK para conectar de manera transparente el subproceso de Node e inyectarle la habilidad climática `get_port_weather` directamente a la lista de herramientas de Gemini.
+
+---
+
 ## 🗺️ Diagrama de Arquitectura del Agente
 
 A continuación se muestra el flujo de orquestación técnica que realiza el agente `factory_planner` utilizando **Google ADK 2.1.0** para validar el lote de producción:
 
 ```mermaid
 graph TD
-    User([👤 Usuario / Gemini Enterprise]) -->|1. Consulta Viabilidad| RootAgent[🤖 Agente Planificador de Fábrica<br>factory_planner]
-    
-    subgraph Inicialización y Habilidades
-        RootAgent -->|Carga de Skills| SkillsDir[(📂 skills/<br>Habilidades en Markdown)]
+    User([👤 Usuario <br> Gemini Enterprise]) -->|1. Consulta| RootAgent["🤖 Agente Planificador<br> (Agent Runtime)"]
+
+    subgraph GCP_Cloud [GCP]
+        RootAgent -->|Carga/Lee/Escribe| GCS[(☁️ GCS Bucket<br>Skills, Schedules, Reportes)]
+        
+        RootAgent -->|3. Llama A2A| A2A[🚚 Agente Logística<br>Cloud Run]
+        RootAgent -->|4. Consulta Clima| MCP[🌦️ MCP Weather Server<br>Cloud Run]
+        
+        A2A --> BQ[(📊 BigQuery)]
     end
-    
-    subgraph Orquestación y Herramientas
-        RootAgent -->|2. Escanea Flota| LocalFile[📄 read_production_schedule<br>production_schedule.json]
-        
-        RootAgent -->|3. Llama por A2A| A2A_Tool[🌐 AgentTool]
-        A2A_Tool -->|Protocolo A2A| RemoteLogistics[🚚 Agente de Logística<br>LogisticsFix en Cloud Run]
-        RemoteLogistics -->| track_by_id | BQ[(📊 BigQuery<br>dev_dataset.containers)]
-        
-        RootAgent -->|4. Consulta Clima| MCP_Tool[⚡ weather_mcp_toolset]
-        MCP_Tool -->|Stdio JSON-RPC| WeatherServer[🌦️ MCP Weather Server<br>Node.js stdio]
-        WeatherServer -->|API Fetch| Wttr[🌍 wttr.in Live API]
-        
-        RootAgent -->|5. Guarda Reporte| WriterTool[💾 save_markdown_report]
-        WriterTool -->|Escribe Markdown| ReportsFolder[(📂 reports/<br>reporte_clima_puerto.md)]
-    end
-    
-    RootAgent -->|6. Respuesta y Previsualización| User
-```
+
+    %% Servicio externo fuera de GCP
+    MCP -->|API Fetch| Wttr[🌍 wttr.in Live API]
+
+    RootAgent -->|6. Respuesta| User
 
 ---
 
@@ -71,17 +83,22 @@ factory-planner/
 
 ---
 
-## 💡 Arquitectura de Skills Modulares (Habilidades Dinámicas)
+## 💡 Arquitectura de Habilidades (Skills) y Configuración en la Nube
 
-Para mostrar las posibilidades completas de **Google ADK**, este proyecto implementa una arquitectura avanzada de **Skills Modulares** inspirada en las habilidades de agentes expertos de Gemini:
+Para demostrar las capacidades completas de **Google ADK 2.1.0** en entornos de gran escala, este proyecto implementa una arquitectura 100% serverless, desacoplada y orientada a la seguridad:
 
-*   **¿Cómo funciona?** Al arrancar el agente, una función dinámica en `app/agent.py` escanea recursivamente el directorio `skills/` y lee de forma automática cualquier archivo `.md` (Markdown). Estas directivas de nivel experto son inyectadas limpiamente como parte del prompt del sistema del agente (`instruction`).
-*   **Modularidad sin código:** Esto te permite arrastrar, renombrar, añadir o remover habilidades completas simplemente gestionando archivos `.md` en la carpeta `skills/` sin tener que alterar una sola línea del código de Python del agente.
-
-### Habilidades Incluidas:
-1.  **Habilidad de Reportes Climáticos Marítimos Profesionales (`skills/weather_report_skill.md`):**
-    *   **Propósito:** Enseña al agente el protocolo estricto y la estructura visual para redactar reportes climáticos profesionales en formato Markdown cuando el usuario le pide evaluar el clima o dar recomendaciones.
-    *   **Acción Física:** Enseña al agente cómo interactuar de forma segura con la herramienta de infraestructura de disco `save_markdown_report` para persistir físicamente los reportes en un directorio local llamado `reports/` (ej: `reports/reporte_clima_buenos_aires.md`), ofreciendo al usuario una previsualización atractiva en el chat de su ejecución.
+*   **Habilidades Dinámicas desde Google Cloud Storage (GCS):**
+    *   Los manuales de habilidades (como `skills/weather_report_skill.md`) se almacenan de forma segura en el bucket **`gs://dvt-sp-agentspace-factory-skills`**.
+    *   **Lazy Loading asíncrono:** Al iniciar la conversación, el agente realiza una importación tardía diferida para descargar las habilidades de GCS en memoria de forma segura dentro del event loop de FastAPI. Esto previene hilos residuales y elimina por completo los crashes de `NoEventLoopError` en el Reasoning Engine de Google Cloud (que corre sobre Python 3.14).
+*   **Cronograma de Flota Dinámico en la Nube:**
+    *   La base de datos de contenedores activos se lee directamente desde **`gs://dvt-sp-agentspace-factory-skills/production_schedule.json`**.
+    *   **¡Súper dinámico!:** Puedes actualizar los barcos o puertos editando directamente el JSON en el bucket de GCS, y el agente en producción leerá los cambios de inmediato sin tener que realizar ningún despliegue de código.
+*   **Seguridad y Autenticación de Extremo a Extremo (OIDC Bearer Token):**
+    *   El servidor MCP del clima en **Cloud Run** está configurado de forma **100% privada** (`--no-allow-unauthenticated`).
+    *   Durante la ejecución del tool, el agente de Python genera dinámicamente un **OIDC Identity Token de Google** desde las credenciales por defecto de su Service Account (o gcloud en local) e inyecta la cabecera `Authorization: Bearer <TOKEN>` para autorizarse contra Cloud Run de forma segura.
+*   **Reportes Climáticos en la Nube con Enlace de Descarga Directo:**
+    *   La herramienta `save_markdown_report` sube de forma pública el reporte Markdown generado a la carpeta `/reports/` de tu bucket de GCS.
+    *   Retorna un enlace público clickeable (`download_url`). Gemini lee esta URL e **inyecta de forma nativa en el chat un botón de descarga directo** (ej: `[📥 Descargar Reporte en GCS](url_generada)`) para que el usuario pueda guardarlo en su PC con un solo clic.
 
 ---
 
@@ -103,7 +120,8 @@ Ejecuta estos comandos desde la carpeta raíz del proyecto (`factory-planner`):
 | :--- | :--- |
 | `agents-cli install` | Instala todas las dependencias del proyecto en un entorno virtual aislado (`.venv`) usando `uv`. |
 | `uv run adk run app` | **Inicia el agente en modo consola interactiva** (ideal para pruebas locales rápidas). |
-| `agents-cli playground` | Lanza el entorno de desarrollo y pruebas interactivo web (auto-recarga al guardar). |
+| `uv run python tests/unit/test_agent_local.py` | Ejecuta la simulación local del agente de extremo a extremo probando GCS, OIDC y A2A en consola. |
+| `uv run adk web --port 8080 .` | Lanza el Web UI interactivo (Playground visual) directo de la ADK en el puerto `8080`. |
 | `uv run pytest tests/unit` | Ejecuta la suite de pruebas unitarias de las herramientas locales. |
 | `agents-cli deploy` | Empaqueta y despliega el agente en **Agent Runtime** de Google Cloud. |
 | `agents-cli publish gemini-enterprise` | Registra el agente y expone sus **skills** en la consola de **Gemini Enterprise**. |
@@ -117,16 +135,14 @@ Ejecuta estos comandos desde la carpeta raíz del proyecto (`factory-planner`):
     agents-cli install
     ```
 
-2.  **Prueba el agente de forma directa en terminal:**
+2.  **Prueba el agente de forma directa en terminal con el simulador:**
     ```bash
-    uv run adk run app
+    uv run python tests/unit/test_agent_local.py
     ```
-    *Escribe consultas como:*
-    > *"¿Puedes validar si el contenedor CMDU4651065 está listo para que iniciemos el lote de producción?"*
 
 3.  **Prueba interactiva web:**
     ```bash
-    agents-cli playground
+    uv run adk web --port 8080 .
     ```
 
 ---

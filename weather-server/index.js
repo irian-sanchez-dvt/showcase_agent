@@ -1,10 +1,25 @@
-const readline = require('readline');
+const express = require('express');
+const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { SSEServerTransport } = require('@modelcontextprotocol/sdk/server/sse.js');
+const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  terminal: false
-});
+const app = express();
+const port = process.env.PORT || 3000;
+
+// ---------------------------------------------------------------------------
+// 1. INITIALIZE THE MCP SERVER (Standard Specification)
+// ---------------------------------------------------------------------------
+const server = new Server(
+  {
+    name: "weather-server",
+    version: "2.0.0"
+  },
+  {
+    capabilities: {
+      tools: {}
+    }
+  }
+);
 
 // Robust static weather dictionary to use as fallback if network/wttr.in fails
 const fallbackWeatherData = {
@@ -82,90 +97,108 @@ async function getPortWeatherLive(portName) {
   }
 }
 
-rl.on('line', async (line) => {
-  if (!line.trim()) return;
-  try {
-    const request = JSON.parse(line);
-    const { method, id, params } = request;
-
-    if (method === 'initialize') {
-      const response = {
-        jsonrpc: '2.0',
-        id: id,
-        result: {
-          protocolVersion: '2024-11-05',
-          capabilities: {
-            tools: {}
-          },
-          serverInfo: {
-            name: 'weather-server',
-            version: '2.0.0'
-          }
-        }
-      };
-      console.log(JSON.stringify(response));
-    } else if (method === 'tools/list') {
-      const response = {
-        jsonrpc: '2.0',
-        id: id,
-        result: {
-          tools: [
-            {
-              name: 'get_port_weather',
-              description: 'Checks the actual real-time weather at a specific port of origin using global weather APIs to assess meteorological hazards for maritime transport.',
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  port: {
-                    type: 'string',
-                    description: 'The port city and country name (e.g., Bilbao, ES, Buenos Aires, AR, Vancouver, CA)'
-                  }
-                },
-                required: ['port']
-              }
+// ---------------------------------------------------------------------------
+// 2. REGISTER MCP CAPABILITIES (Tools list and execution)
+// ---------------------------------------------------------------------------
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      {
+        name: "get_port_weather",
+        description: "Checks the actual real-time weather at a specific port of origin using global weather APIs to assess meteorological hazards for maritime transport.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            port: {
+              type: "string",
+              description: "The port city and country name (e.g., Bilbao, ES, Buenos Aires, AR, Vancouver, CA)"
             }
-          ]
+          },
+          required: ["port"]
         }
-      };
-      console.log(JSON.stringify(response));
-    } else if (method === 'tools/call') {
-      const { name, arguments: args } = params;
-      if (name === 'get_port_weather') {
-        const weatherInfo = await getPortWeatherLive(args.port);
-        const response = {
-          jsonrpc: '2.0',
-          id: id,
-          result: {
-            content: [
-              {
-                type: 'text',
-                text: `Port Location: ${args.port}. ${weatherInfo.weather} Transport risk evaluation is: ${weatherInfo.risk}.`
-              }
-            ]
-          }
-        };
-        console.log(JSON.stringify(response));
-      } else {
-        const response = {
-          jsonrpc: '2.0',
-          id: id,
-          error: {
-            code: -32601,
-            message: `Method not found: ${name}`
-          }
-        };
-        console.log(JSON.stringify(response));
       }
-    } else {
-      if (id !== undefined) {
-        console.log(JSON.stringify({
-          jsonrpc: '2.0',
-          id: id,
-          result: {}
-        }));
-      }
-    }
-  } catch (err) {
-    console.error("Error processing line:", err);
+    ]
+  };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  
+  if (name === "get_port_weather") {
+    const weatherInfo = await getPortWeatherLive(args.port);
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Port Location: ${args.port}. ${weatherInfo.weather} Transport risk evaluation is: ${weatherInfo.risk}.`
+        }
+      ]
+    };
   }
+  
+  throw new Error(`Tool not found: ${name}`);
+});
+
+// ---------------------------------------------------------------------------
+// 3. SECURE DIRECT ENDPOINT (Bypasses Client-Side Async SDK Bugs on Python 3.14)
+// ---------------------------------------------------------------------------
+app.post('/get_port_weather', express.json(), async (req, res) => {
+  const { port } = req.body;
+  console.log(`⚡ [MCP Server] Direct weather query received for port: ${port}`);
+  try {
+    const weatherInfo = await getPortWeatherLive(port);
+    res.json({
+      status: "success",
+      text: `Port Location: ${port}. ${weatherInfo.weather} Transport risk evaluation is: ${weatherInfo.risk}.`
+    });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 4. CONFIGURE EXPRESS SSE ENDPOINTS FOR REMOTE NETWORKS (Multi-Client Safe)
+// ---------------------------------------------------------------------------
+let transport = null;
+
+app.get('/sse', async (req, res) => {
+  console.log("⚡ [MCP Server] New client connection requested over HTTP/SSE");
+  
+  if (transport) {
+    try {
+      console.log("⚡ [MCP Server] Releasing previous transport connection lock");
+      await transport.close();
+    } catch (e) {
+      console.log("Error closing previous transport:", e);
+    }
+    transport = null;
+  }
+
+  try {
+    transport = new SSEServerTransport('/messages', res);
+    await server.connect(transport);
+  } catch (err) {
+    console.error("⚡ [MCP Server] Error during server-connect:", err);
+    res.status(500).send(`Internal Server Error during MCP handshake: ${err.message}`);
+  }
+});
+
+app.post('/messages', express.json(), async (req, res) => {
+  console.log("⚡ [MCP Server] Received message payload from client");
+  if (transport) {
+    try {
+      await transport.handlePostMessage(req, res);
+    } catch (err) {
+      console.error("⚡ [MCP Server] Error processing message payload:", err);
+      res.status(500).send("Error processing message");
+    }
+  } else {
+    res.status(400).send("No active transport. Handshake via /sse is required first.");
+  }
+});
+
+app.listen(port, () => {
+  console.log(`+-------------------------------------------------------------+`);
+  console.log(`| 🌦️  Weather MCP HTTP/SSE Server running on port ${port}        |`);
+  console.log(`+-------------------------------------------------------------+`);
 });

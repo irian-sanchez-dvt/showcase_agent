@@ -16,7 +16,6 @@ import logging
 import os
 
 import google.auth
-from google.adk.cli.adk_web_server import _setup_instrumentation_lib_if_installed
 from google.adk.telemetry.google_cloud import get_gcp_exporters, get_gcp_resource
 from google.adk.telemetry.setup import maybe_set_otel_providers
 
@@ -67,8 +66,5 @@ def setup_telemetry() -> str | None:
         otel_hooks_to_setup=[otel_hooks],
         otel_resource=otel_resource,
     )
-
-    # Set up GenAI SDK instrumentation
-    _setup_instrumentation_lib_if_installed()
 
     return bucket

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from app.agent import read_production_schedule, remote_logistics_agent, save_markdown_report
+from app.agent import read_production_schedule, remote_logistics_agent, save_markdown_report, get_port_weather
 
 
 def test_read_production_schedule() -> None:
@@ -60,3 +60,16 @@ def test_save_markdown_report() -> None:
         os.remove(result["filepath"])
     except Exception:
         pass
+
+
+def test_get_port_weather_live() -> None:
+    """Tests that the get_port_weather tool securely connects to the deployed Cloud Run MCP and fetches live results."""
+    # Test with Bilbao
+    result = get_port_weather("Bilbao, ES")
+    assert "Bilbao" in result
+    assert "Transport risk" in result
+    
+    # Test with Buenos Aires
+    result_ba = get_port_weather("Buenos Aires, AR")
+    assert "Buenos Aires" in result_ba
+    assert "Transport risk" in result_ba
