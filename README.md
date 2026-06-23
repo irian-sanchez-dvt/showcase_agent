@@ -42,21 +42,48 @@ Esta es la carpeta más importante, donde residirá toda la lógica de inteligen
 
 ---
 
-## 🚀 Primeros Pasos
+## 🚀 Primeros Pasos en Google Cloud Shell Editor
 
-### 1. Configuración del entorno
+> Estos pasos están pensados para ejecutarse íntegramente desde **Cloud Shell Editor** (editor.cloud.google.com). No necesitas instalar nada en tu máquina local.
+
+### Paso 0 — Abre el proyecto en Cloud Shell Editor
+
+1. Ve a [shell.cloud.google.com/cloudshell/editor](https://shell.cloud.google.com/cloudshell/editor)
+2. Clona este repositorio en el terminal inferior:
+
+```bash
+git clone https://github.com/irian-sanchez-dvt/showcase_agent.git
+cd showcase_agent
+```
+
+3. En el menú **File → Open Folder**, abre la carpeta `showcase_agent` para verla en el explorador de ficheros.
+
+---
+
+### Paso 1 — Ejecuta el script de configuración
+
+El script instala `uv`, `google-agents-cli`, crea el `.env` inicial y autentica tu sesión con GCP:
 
 ```bash
 bash setup.sh
+```
+
+Cuando te pida login, sigue el enlace que aparece en el terminal y pega el código de verificación. Al terminar, activa el entorno virtual:
+
+```bash
 source .venv/bin/activate
 ```
 
-### 2. Configura tus variables de entorno
+---
 
-Copia la plantilla y rellena tus valores:
+### Paso 2 — Configura tus variables de entorno
+
+El script ya ha creado el archivo `.env` a partir de `.env.example`. Ábrelo en el editor y rellena tus valores reales:
 
 ```bash
-cp .env.example .env
+# En el terminal de Cloud Shell
+nano .env
+# O ábrelo directamente desde el explorador de ficheros del editor
 ```
 
 Variables clave en `.env`:
@@ -64,14 +91,31 @@ Variables clave en `.env`:
 | Variable | Descripción |
 | :--- | :--- |
 | `OFFLINE_MODE` | `true` para desarrollo local sin GCP, `false` para producción |
-| `GOOGLE_CLOUD_PROJECT` | ID de tu proyecto de GCP |
+| `GOOGLE_CLOUD_PROJECT` | ID de tu proyecto de GCP (ej: `mi-proyecto-123`) |
 | `MCP_SERVER_URL` | URL de tu servidor MCP desplegado en Cloud Run |
 | `PARTNER_AGENT_URL` | URL del agente partner remoto (A2A) |
 | `GCS_SKILLS_BUCKET` | Nombre del bucket GCS para habilidades y reportes |
 
-### 3. Despliega tu servidor MCP
+> **Tip:** Para encontrar tu Project ID ejecuta `gcloud config get-value project`.
 
-El servidor MCP incluido en `mcp-server/` es tu punto de partida. Despliégalo en Cloud Run:
+---
+
+### Paso 3 — Prueba el agente en modo offline
+
+Antes de desplegar nada en la nube, verifica que el agente arranca correctamente en modo local:
+
+```bash
+# Asegúrate de tener OFFLINE_MODE=true en tu .env
+uv run adk web --port 8080 .
+```
+
+Cloud Shell abrirá automáticamente una ventana de preview (o puedes hacer clic en el icono **Web Preview → Preview on port 8080**). Deberías ver el playground del ADK y poder chatear con el agente.
+
+---
+
+### Paso 4 — Despliega tu servidor MCP en Cloud Run
+
+Con el agente funcionando en local, el siguiente paso es conectarlo a un servidor MCP real. Desde el terminal de Cloud Shell:
 
 ```bash
 cd mcp-server
@@ -81,9 +125,34 @@ gcloud run deploy my-mcp-server \
   --no-allow-unauthenticated
 ```
 
-Una vez desplegado, copia la URL generada y ponla en `MCP_SERVER_URL` de tu `.env`.
+Cuando termine, copia la URL que aparece (`Service URL: https://my-mcp-server-xxxx.a.run.app`) y pégala en tu `.env`:
 
-> **Ejercicio:** Abre `mcp-server/index.js` y busca el `TODO: [EJERCICIO]` en la función `getGenericDataLive`. Sustituye la lógica de ejemplo por la tuya (llamada a una API real, base de datos, etc.).
+```env
+MCP_SERVER_URL=https://my-mcp-server-xxxx.a.run.app
+OFFLINE_MODE=false
+```
+
+Vuelve a la raíz del proyecto:
+
+```bash
+cd ..
+```
+
+> **Ejercicio:** Antes de desplegar, abre `mcp-server/index.js` y sustituye el `TODO: [EJERCICIO]` en `getGenericDataLive` por la lógica real de tu caso de uso.
+
+---
+
+### Paso 5 — Despliega el agente en Agent Runtime (GCP)
+
+```bash
+agents-cli deploy
+```
+
+Cuando el deploy termine, registra el agente en Gemini Enterprise para que tu equipo pueda usarlo:
+
+```bash
+agents-cli publish gemini-enterprise
+```
 
 ---
 
