@@ -169,17 +169,37 @@ def load_gcs_config() -> dict:
 # 1. TEMPLATE CUSTOM TOOL (generic_tool)
 # ---------------------------------------------------------------------------
 def generic_tool(param: str) -> str:
-    """Describe what this generic tool does and what input it expects.
+    """Genera un resumen conciso del texto proporcionado por el usuario.
 
     Args:
-        param: A description of the input parameter.
+        param: El texto a resumir (puede ser un párrafo, artículo o cualquier contenido de texto).
 
     Returns:
-        str: A description of the output format.
+        str: Un resumen estructurado con las ideas principales del texto.
     """
-    # TODO: [EJERCICIO] Implementar la lógica de esta herramienta personalizada para el taller.
-    logger.info(f"⚙️ [PLACEHOLDER] Ejecutando generic_tool con el parámetro: {param}")
-    return f"Resultado de generic_tool con parámetro '{param}' (Implementar por el alumno)"
+    # TODO: [EJERCICIO] Sustituye esta implementación por la lógica personalizada de tu agente.
+    # Por ejemplo: llamar a una API, consultar una base de datos, ejecutar un cálculo, etc.
+    logger.info(f"⚙️ [generic_tool] Resumiendo texto de {len(param)} caracteres.")
+
+    if not param or not param.strip():
+        return "Error: el parámetro de texto está vacío. Proporciona un texto para resumir."
+
+    words = param.split()
+    word_count = len(words)
+    sentence_count = param.count('.') + param.count('!') + param.count('?')
+    # Extractive summary: take first and last sentence as key ideas
+    sentences = [s.strip() for s in param.replace('!', '.').replace('?', '.').split('.') if s.strip()]
+    key_ideas = sentences[:2] if len(sentences) >= 2 else sentences
+
+    summary_lines = [
+        f"📝 **Resumen del texto:**",
+        f"- Longitud: {word_count} palabras, {sentence_count} oraciones.",
+        f"- Ideas principales extraídas:",
+    ]
+    for idea in key_ideas:
+        summary_lines.append(f"  • {idea}.")
+
+    return "\n".join(summary_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +296,9 @@ def generic_mcp_tool(query: str) -> str:
         return f"Consulta: {query}. [OFFLINE MOCK DATA] {matched_info['data']} El estado de la operación es: {matched_info['status']}."
 
     # 2. Modo Producción Remoto en la Nube (Cloud Run)
-    mcp_audience = "https://weather-mcp-server-239233954615.europe-west1.run.app" # Reemplazar con URL real en Cloud Run
+    mcp_audience = os.getenv("MCP_SERVER_URL", "")
+    if not mcp_audience:
+        return "Error: MCP_SERVER_URL no está configurada. Define la variable en tu archivo .env apuntando a tu servidor MCP desplegado en Cloud Run."
     mcp_url = f"{mcp_audience}/generic_mcp_tool"
     
     # Obtener el token de identidad para pasar la seguridad IAM de Cloud Run de forma segura

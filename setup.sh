@@ -36,9 +36,9 @@ else
     echo "✅ El archivo '.env' ya existe."
 fi
 
-# 4. Sincronizar dependencias de Python utilizando el CLI oficial
-echo "🐍 Instalando dependencias de Python del proyecto con 'agents-cli install'..."
-agents-cli install
+# 4. Sincronizar dependencias de Python con uv
+echo "🐍 Instalando dependencias de Python del proyecto con 'uv sync'..."
+uv sync
 
 # 5. Autenticación de Credenciales por Defecto de GCP (ADC)
 echo "🔐 Configurando las credenciales de Google Cloud..."
