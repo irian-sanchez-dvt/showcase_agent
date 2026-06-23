@@ -21,10 +21,9 @@ import google.auth
 from google.adk.agents import Agent
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from google.adk.apps import App
-from google.adk.models import Gemini
+from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools import AgentTool
 from google.adk.agents.callback_context import CallbackContext
-from google.genai import types
 from a2a.types import AgentCard
 
 # Load local environment variables from .env file if present
@@ -46,11 +45,11 @@ for env_path in possible_env_paths:
         except Exception:
             pass
 
-# Set up GCP and Vertex AI environment variables
-_, project_id = google.auth.default()
-os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project_id)
-os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
+# Set up GCP environment variables (solo necesario si se usa Vertex AI)
+if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true":
+    _, project_id = google.auth.default()
+    os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project_id)
+    os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -390,9 +389,10 @@ No inventes datos que no hayan sido proporcionados explícitamente por las herra
 
 root_agent = Agent(
     name="factory_planner",
-    model=Gemini(
-        model="gemini-2.5-flash",
-        retry_options=types.HttpRetryOptions(attempts=3),
+    model=LiteLlm(
+        model=os.getenv("ANTHROPIC_MODEL", "anthropic/claude-sonnet-4-5"),
+        api_base=os.getenv("ANTHROPIC_BASE_URL"),
+        api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
     ),
     description="Asistente planificador inteligente que cruza datos remotos mediante un servidor MCP y colabora de forma remota mediante protocolo A2A.",
     instruction=base_instruction, # Arranca con la instrucción base; las skills se inyectan dinámicamente en init_session_state
