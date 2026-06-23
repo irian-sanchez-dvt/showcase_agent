@@ -76,7 +76,24 @@ source .venv/bin/activate
 
 ---
 
-### Paso 2 — Configura tus variables de entorno
+### Paso 2 — Obtén tu API key del proxy LiteLLM
+
+Este boilerplate usa **Claude** a través del proxy LiteLLM corporativo de MasOrange en lugar de llamar directamente a Vertex AI. Esto significa que no necesitas configurar credenciales de Gemini ni habilitar APIs de Vertex AI.
+
+Para obtener tu API key personal:
+
+1. Ve al canal de Slack **#cloud-ai-ngineering** y escribe `@Cloud AI-ngineering` para solicitar tu key.
+2. El bot responderá automáticamente con tu `ANTHROPIC_AUTH_TOKEN` personal (formato `sk-...`).
+3. La key expira en 90 días — renuévala de la misma forma.
+
+> Para más detalles sobre el proxy y configuraciones avanzadas consulta la documentación oficial:
+> **[Guía de configuración LiteLLM → idp.masstack.com](https://idp.masstack.com/docs/default/component/cloud-engineering/claude-code/litellm-setup/)**
+
+---
+
+### Paso 3 — Configura tus variables de entorno
+
+El script ya ha creado el archivo `.env` a partir de `.env.example`. Ábrelo y rellena tus valores:
 
 El script ya ha creado el archivo `.env` a partir de `.env.example`. Ábrelo en el editor y rellena tus valores reales:
 
@@ -90,6 +107,9 @@ Variables clave en `.env`:
 
 | Variable | Descripción |
 | :--- | :--- |
+| `ANTHROPIC_AUTH_TOKEN` | Tu API key personal del proxy LiteLLM (del bot de Slack) |
+| `ANTHROPIC_BASE_URL` | URL del proxy: `https://llm.tools.cloud.masorange.es` |
+| `ANTHROPIC_MODEL` | Modelo a usar, por defecto `anthropic/claude-sonnet-4-5` |
 | `OFFLINE_MODE` | `true` para desarrollo local sin GCP, `false` para producción |
 | `GOOGLE_CLOUD_PROJECT` | ID de tu proyecto de GCP (ej: `mi-proyecto-123`) |
 | `MCP_SERVER_URL` | URL de tu servidor MCP desplegado en Cloud Run |
@@ -100,7 +120,7 @@ Variables clave en `.env`:
 
 ---
 
-### Paso 3 — Prueba el agente en modo offline
+### Paso 4 — Prueba el agente en modo offline
 
 Antes de desplegar nada en la nube, verifica que el agente arranca correctamente en modo local:
 
@@ -113,7 +133,7 @@ Cloud Shell abrirá automáticamente una ventana de preview (o puedes hacer clic
 
 ---
 
-### Paso 4 — Despliega tu servidor MCP en Cloud Run
+### Paso 5 — Despliega tu servidor MCP en Cloud Run
 
 Con el agente funcionando en local, el siguiente paso es conectarlo a un servidor MCP real. Desde el terminal de Cloud Shell:
 
@@ -142,7 +162,7 @@ cd ..
 
 ---
 
-### Paso 5 — Despliega el agente en Agent Runtime (GCP)
+### Paso 6 — Despliega el agente en Agent Runtime (GCP)
 
 ```bash
 agents-cli deploy
