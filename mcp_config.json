@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "weather-server": {
-      "command": "node",
-      "args": ["C:/Users/irsanchez/Documents/proyectos/+orange/showcase_agent/factory-planner/weather-server/index.js"]
-    }
-  }
-}
