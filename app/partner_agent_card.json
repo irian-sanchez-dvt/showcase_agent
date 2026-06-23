@@ -2,7 +2,7 @@
   "protocolVersion": "1.0",
   "name": "PartnerAgent",
   "description": "Agente remoto colaborador (partner) capaz de resolver consultas y delegar subtareas especializadas.",
-  "url": "https://<PARTNER_AGENT_URL>",
+  "url": "https://your-partner-agent-service-xxxxxx.a.run.app/v2-adk-stateless",
   "version": "1.0.0",
   "capabilities": {
     "streaming": false
