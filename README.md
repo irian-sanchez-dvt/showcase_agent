@@ -6,14 +6,13 @@ Está diseñado específicamente como un esqueleto inicial para talleres y sesio
 
 ---
 
-## 🚀 Inicialización Rápida en Cloud Shell
+## ¿Qué hace este agente?
 
-Para simplificar al máximo el arranque en los talleres, puedes utilizar el script de configuración automatizado.
+`factory_planner` es un agente experto genérico diseñado como una plantilla estructurada de ReAct. Su toma de decisiones demuestra la combinación de tres coordenadas de información que los asistentes del taller pueden expandir:
 
-Ejecuta el siguiente comando en la terminal de Cloud Shell para instalar todas las dependencias, herramientas del CLI, inicializar el entorno y autenticarte en Google Cloud:
-```bash
-chmod +x setup.sh && ./setup.sh
-```
+1.  **Herramientas Locales a Medida (`generic_tool`):** Una función local estructurada que sirve de placeholder para que los alumnos aprendan a programar y exponer lógicas personalizadas de Python al modelo.
+2.  **Servidor MCP Remoto (`generic_mcp_tool`):** Llama a un microservicio externo compatible con el estándar abierto **Model Context Protocol (MCP)** para realizar consultas estructuradas de base de datos o APIs remotas de forma segura.
+3.  **Colaboración Remota vía A2A (`partner_agent`):** Utiliza la interconexión nativa de A2A de Google ADK para comunicarse de manera remota con otros agentes del ecosistema que exponen habilidades y delegar tareas especializadas de forma transparente.
 
 ---
 
@@ -32,9 +31,9 @@ Esta es la carpeta más importante, donde residirá toda la lógica de inteligen
 *   Contiene manuales e instrucciones expertas escritas en Markdown (ej: `weather_report_skill.md`).
 *   **¿Para qué sirve?** El agente lee dinámicamente estos archivos (vía GCS o disco local) en caliente durante la inicialización del chat y los inyecta en su prompt. Esto permite actualizar o añadir nuevas destrezas al agente en tiempo real sin tener que redesplegar una sola línea de código en producción.
 
-### 3. `weather-server/` (Servidor MCP de Ejemplo)
-*   Implementa un servidor de **Model Context Protocol (MCP)** desarrollado en **Node.js** que se comunica vía entrada/salida estándar (stdio) utilizando JSON-RPC 2.0.
-*   **¿Para qué sirve?** Sirve como un ejemplo de referencia real ("wrapper") que envuelve la API global de clima `wttr.in`, filtra las respuestas pesadas y clasifica los riesgos climáticos para entregárselos ya procesados al modelo de lenguaje. Es tu plantilla para aprender a crear tus propios servidores MCP.
+### 3. `mcp-server/` (Servidor MCP de Ejemplo)
+*   Implementa un servidor de **Model Context Protocol (MCP)** desarrollado en **Node.js** que se comunica vía entrada/salida estándar (stdio) o HTTP/SSE utilizando JSON-RPC 2.0.
+*   **¿Para qué sirve?** Sirve como una plantilla de referencia real de cómo desarrollar, estructurar y exponer herramientas y recursos a través del estándar MCP de manera privada en Cloud Run.
 
 ### 4. `deployment/` (Infraestructura de Despliegue)
 *   Contiene configuraciones de **Terraform** listas para producción.
@@ -68,4 +67,4 @@ Para activarlo, asegúrate de tener configurado en tu archivo `.env` local:
 ```env
 OFFLINE_MODE=true
 ```
-Esto redirigirá la descarga de habilidades al disco local, simulará respuestas locales de clima y guardará los resultados en una carpeta local de reportes.
+Esto redirigirá la descarga de habilidades al disco local, simulará consultas locales de tu servidor MCP y mantendrá la ejecución libre de conexiones de red externas obligatorias.

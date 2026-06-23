@@ -209,7 +209,7 @@ remote_partner_agent = RemoteA2aAgent(
 
 
 # ---------------------------------------------------------------------------
-# 3. WEATHER MCP SERVER INTEGRATION (get_port_weather)
+# 3. GENERIC REMOTE MCP SERVER INTEGRATION (generic_mcp_tool)
 # ---------------------------------------------------------------------------
 import subprocess
 
@@ -240,50 +240,44 @@ def get_google_id_token(audience: str) -> str:
             logger.warning(f"No se pudo generar el ID Token localmente para el MCP: {local_err}")
             return ""
 
-def get_port_weather(port: str) -> str:
-    """Checks the actual real-time weather at a specific port of origin using global weather APIs to assess meteorological hazards for maritime transport.
+def generic_mcp_tool(query: str) -> str:
+    """Checks the remote MCP database for a specific query to fetch real-time operational data.
 
     Args:
-        port: The port city and country name (e.g., Bilbao, ES, Buenos Aires, AR, Vancouver, CA).
+        query: The search query or identifier (e.g., 'consulta_a', 'consulta_b').
 
     Returns:
-        str: El reporte meteorológico detallado en castellano y el nivel de riesgo de transporte terrestre/marítimo.
+        str: El reporte de datos detallado en castellano y el estado de la operación.
     """
     fallback_offline_data = {
-      "buenos aires, ar": { "weather": "Sunny, calm seas.", "risk": "LOW" },
-      "bilbao, es": { "weather": "Severe storm, gale-force winds, heavy swells.", "risk": "HIGH" },
-      "felixstowe, uk": { "weather": "Dense fog, restricted visibility.", "risk": "MEDIUM" },
-      "jeddah, sa": { "weather": "Sunny, high temperatures, calm seas.", "risk": "LOW" },
-      "busan, kr": { "weather": "Partly cloudy, light breeze.", "risk": "LOW" },
-      "noumea, nc": { "weather": "Tropical depression nearby, rough seas, windy.", "risk": "MEDIUM" },
-      "callao, pe": { "weather": "Clear sky, moderate currents.", "risk": "LOW" },
-      "tangier, ma": { "weather": "Clear, mild winds.", "risk": "LOW" },
-      "vancouver, ca": { "weather": "Heavy rainfall and strong offshore winds.", "risk": "HIGH" }
+      "consulta_a": { "data": "Detalles completos de la consulta A.", "status": "PROCESADO" },
+      "consulta_b": { "data": "Detalles completos de la consulta B.", "status": "PENDIENTE" },
+      "consulta_c": { "data": "Detalles completos de la consulta C.", "status": "EN_CURSO" }
     }
 
     # 1. Si OFFLINE_MODE es true, consultamos de forma 100% local sin red
     if IS_OFFLINE:
-        logger.info("📡 [MODO OFFLINE] Resolviendo el clima del puerto localmente...")
+        logger.info("📡 [MODO OFFLINE] Resolviendo la consulta MCP localmente...")
         # Intento de llamar a un servidor Node local ejecutándose en el puerto 3000
         try:
-            response = requests.post("http://localhost:3000/get_port_weather", json={"port": port}, timeout=2)
+            response = requests.post("http://localhost:3000/generic_mcp_tool", json={"query": query}, timeout=2)
             if response.status_code == 200:
                 return response.json().get("text", "No se pudo recuperar el reporte local.")
         except Exception:
             pass
             
         # Fallback instantáneo en Python puro si no hay servidor local corriendo (Demo Blindada)
-        clean_key = port.lower().strip()
-        matched_info = { "weather": "Partly cloudy, calm seas.", "risk": "LOW" }
+        clean_key = query.lower().strip()
+        matched_info = { "data": f"Resultado simulado local para '{query}'.", "status": "ÉXITO" }
         for k, val in fallback_offline_data.items():
             if k in clean_key or clean_key in k:
                 matched_info = val
                 break
-        return f"Port Location: {port}. [OFFLINE MOCK DATA] {matched_info['weather']} Transport risk evaluation is: {matched_info['risk']}."
+        return f"Consulta: {query}. [OFFLINE MOCK DATA] {matched_info['data']} El estado de la operación es: {matched_info['status']}."
 
     # 2. Modo Producción Remoto en la Nube (Cloud Run)
-    mcp_audience = "https://weather-mcp-server-239233954615.europe-west1.run.app"
-    mcp_url = f"{mcp_audience}/get_port_weather"
+    mcp_audience = "https://weather-mcp-server-239233954615.europe-west1.run.app" # Reemplazar con URL real en Cloud Run
+    mcp_url = f"{mcp_audience}/generic_mcp_tool"
     
     # Obtener el token de identidad para pasar la seguridad IAM de Cloud Run de forma segura
     id_token = get_google_id_token(mcp_audience)
@@ -292,13 +286,13 @@ def get_port_weather(port: str) -> str:
         headers["Authorization"] = f"Bearer {id_token}"
         
     try:
-        response = requests.post(mcp_url, json={"port": port}, headers=headers, timeout=10)
+        response = requests.post(mcp_url, json={"query": query}, headers=headers, timeout=10)
         if response.status_code == 200:
-            return response.json().get("text", "No se pudo recuperar el reporte de clima.")
+            return response.json().get("text", "No se pudo recuperar el reporte desde el MCP.")
         else:
-            return f"Error al conectar con el microservicio de clima (HTTP {response.status_code}): {response.text}"
+            return f"Error al conectar con el servidor MCP (HTTP {response.status_code}): {response.text}"
     except Exception as e:
-        return f"Error de red al conectar con el microservicio de clima en Cloud Run: {str(e)}"
+        return f"Error de red al conectar con el servidor MCP remoto en Cloud Run: {str(e)}"
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +348,7 @@ base_instruction = """Eres un asistente virtual experto y proactivo diseñado ut
 Tu misión es ayudar a resolver las consultas del usuario utilizando de forma inteligente tu catálogo de herramientas.
 
 Sigue este protocolo de actuación de forma rigurosa:
-1. Si la consulta del usuario requiere información climática de un puerto o ciudad, utiliza la herramienta `get_port_weather` para obtener datos meteorológicos precisos y reales.
+1. Si la consulta del usuario requiere información o datos que residen en nuestro servidor MCP remoto, utiliza la herramienta `generic_mcp_tool` para obtener datos precisos y reales.
 2. Si la consulta requiere interactuar con nuestro socio o agente remoto colaborador, utiliza la herramienta `partner_agent` describiendo claramente lo que necesitas en la petición de texto.
 3. Para otras tareas personalizadas o lógicas a medida, utiliza la herramienta `generic_tool`.
 4. Combina la información recolectada de tus herramientas de manera coherente y redacta una respuesta final clara, detallada y profesional en castellano.
@@ -369,12 +363,12 @@ root_agent = Agent(
         model="gemini-2.5-flash",
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
-    description="Asistente planificador inteligente que cruza datos climáticos en tiempo real y colabora de forma remota mediante protocolo A2A.",
+    description="Asistente planificador inteligente que cruza datos remotos mediante un servidor MCP y colabora de forma remota mediante protocolo A2A.",
     instruction=base_instruction, # Arranca con la instrucción base; las skills se inyectan dinámicamente en init_session_state
     tools=[
         generic_tool,
         AgentTool(remote_partner_agent),
-        get_port_weather,  # Herramienta climática remota que se comunica de forma autenticada con el microservicio MCP en Cloud Run
+        generic_mcp_tool,  # Herramienta remota genérica de MCP
     ],
     before_agent_callback=init_session_state,
     before_tool_callback=before_tool_call,
