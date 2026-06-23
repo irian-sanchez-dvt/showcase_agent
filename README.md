@@ -1,6 +1,6 @@
-# factory-planner (Boilerplate de Agente Inteligente)
+# factory-planner boilerpate (Boilerplate de Agente Inteligente)
 
-Este repositorio es un **boilerplate (plantilla de inicio)** para construir agentes inteligentes orquestadores basados en ReAct utilizando el **Google Agent Development Kit (ADK)** y listos para interactuar mediante el protocolo **Agent-to-Agent (A2A)** y servidores **Model Context Protocol (MCP)**.
+Este repositorio es un **boilerplate (plantilla de inicio)** para construir agentes inteligentes orquestadores basados en ReAct utilizando el **Google Agent Development Kit (ADK)** y listos para interactuar mediante el protocolo **Agent-to-Agent (A2A)** y servidores **Model Context Protocol (MCP)** basándonos en el agente mostrado en la preparación del jueves 18.
 
 Está diseñado específicamente como un esqueleto inicial para talleres y sesiones de aprendizaje, listo para ser desplegado y ejecutado en **Google Cloud Shell Editor**.
 
