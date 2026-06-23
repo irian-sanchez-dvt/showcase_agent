@@ -106,7 +106,7 @@ Antes de desplegar nada en la nube, verifica que el agente arranca correctamente
 
 ```bash
 # Asegúrate de tener OFFLINE_MODE=true en tu .env
-uv run adk web --port 8080 .
+uv run adk web --port 8080 --allow_origins "regex:.*" .
 ```
 
 Cloud Shell abrirá automáticamente una ventana de preview (o puedes hacer clic en el icono **Web Preview → Preview on port 8080**). Deberías ver el playground del ADK y poder chatear con el agente.
@@ -162,7 +162,7 @@ agents-cli publish gemini-enterprise
 | :--- | :--- |
 | `source .venv/bin/activate` | Activa el entorno virtual de Python en tu terminal. |
 | `uv run adk run app` | **Inicia tu agente en modo consola interactiva** (puedes chatear con él directamente en la terminal). |
-| `uv run adk web --port 8080 .` | Lanza el Web UI interactivo (Playground visual) de la ADK en el puerto `8080`. |
+| `uv run adk web --port 8080 --allow_origins "regex:.*" .` | Lanza el Web UI interactivo (Playground visual) de la ADK en el puerto `8080`. |
 | `agents-cli deploy` | Empaqueta y despliega tu agente en **Agent Runtime** de Google Cloud. |
 | `agents-cli publish gemini-enterprise` | Registra el agente en la consola de **Gemini Enterprise** para que tu equipo pueda usarlo. |
 
