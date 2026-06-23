@@ -52,7 +52,7 @@ Esta es la carpeta más importante, donde residirá toda la lógica de inteligen
 2. Clona este repositorio en el terminal inferior:
 
 ```bash
-git clone https://github.com/irian-sanchez-dvt/showcase_agent.git
+git clone --branch boilerplate --single-branch https://github.com/irian-sanchez-dvt/showcase_agent.git
 cd showcase_agent
 ```
 
