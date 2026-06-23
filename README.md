@@ -66,7 +66,7 @@ graph TD
 ```
 factory-planner/
 ├── app/                      # Código principal del agente
-│   ├── agent.py                 # Lógica de razonamiento, tools y callbacks del agente
+│   ├── agent.py                 # Lógica de razonamiento, tools y callbacks del agente (Boilerplate)
 │   ├── agent_runtime_app.py      # Envoltorio del agente para Agent Runtime de GCP
 │   ├── logistics_agent_card.json # Agent Card del servicio remoto de Logística A2A
 │   └── app_utils/               # Utilidades de telemetría y tipado del ADK
@@ -74,11 +74,11 @@ factory-planner/
 │   └── weather_report_skill.md  # Instrucciones expertas para generación de reportes climáticos
 ├── weather-server/           # Servidor MCP de Clima Real (Node.js stdio)
 │   └── index.js                 # Manejador JSON-RPC 2.0 y consultas HTTP a wttr.in
-├── tests/                    # Pruebas unitarias, integración y evaluación
 ├── DEPLOY_GCP.md             # Guía detallada para despliegue y registro en GCP
 ├── GEMINI.md                 # Guía para el agente de desarrollo de IA (Gemini CLI/Antigravity)
+├── setup.sh                  # Script de configuración automatizado para Cloud Shell Editor
 ├── mcp_config.json           # Configuración del servidor MCP 
-├── production_schedule.json  # Datos locales de contenedores activos
+├── production_schedule.json  # Datos locales de contenedores activos (Placeholder para el taller)
 └── pyproject.toml            # Dependencias del proyecto Python
 ```
 
@@ -122,9 +122,20 @@ Cuando esta variable es `true`, el agente inteligente de Python activa un protoc
 
 ---
 
-## Requisitos Previos
+## 🚀 Inicialización Rápida en Cloud Shell
 
-Antes de comenzar, asegúrate de tener instalado:
+Para simplificar al máximo el arranque en los talleres, puedes utilizar el script de configuración automatizado.
+
+Ejecuta el siguiente comando en la terminal para instalar todas las dependencias, herramientas del CLI, inicializar el entorno y autenticarte en Google Cloud:
+```bash
+chmod +x setup.sh && ./setup.sh
+```
+
+---
+
+## Requisitos Previos (Instalación Manual)
+
+Si prefieres no usar el script automático, asegúrate de tener instalado:
 *   **uv**: Gestor de paquetes de Python de alto rendimiento - [Instalar uv](https://docs.astral.sh/uv/getting-started/installation/)
 *   **agents-cli**: CLI oficial de agentes de Google - Instálalo ejecutando: `uv tool install google-agents-cli`
 *   **Google Cloud SDK**: Para los servicios e integraciones en la nube - [Instalar gcloud](https://cloud.google.com/sdk/docs/install)
@@ -138,11 +149,10 @@ Ejecuta estos comandos desde la carpeta raíz del proyecto (`factory-planner`):
 
 | Comando | Descripción |
 | :--- | :--- |
+| `./setup.sh` | Ejecuta la inicialización automática para talleres en Cloud Shell. |
 | `agents-cli install` | Instala todas las dependencias del proyecto en un entorno virtual aislado (`.venv`) usando `uv`. |
 | `uv run adk run app` | **Inicia el agente en modo consola interactiva** (ideal para pruebas locales rápidas). |
-| `uv run python tests/unit/test_agent_local.py` | Ejecuta la simulación local del agente de extremo a extremo probando GCS, OIDC y A2A en consola. |
 | `uv run adk web --port 8080 .` | Lanza el Web UI interactivo (Playground visual) directo de la ADK en el puerto `8080`. |
-| `uv run pytest tests/unit` | Ejecuta la suite de pruebas unitarias de las herramientas locales. |
 | `agents-cli deploy` | Empaqueta y despliega el agente en **Agent Runtime** de Google Cloud. |
 | `agents-cli publish gemini-enterprise` | Registra el agente y expone sus **skills** en la consola de **Gemini Enterprise**. |
 
@@ -150,14 +160,15 @@ Ejecuta estos comandos desde la carpeta raíz del proyecto (`factory-planner`):
 
 ## Pruebas y Desarrollo Local
 
-1.  **Instala las dependencias:**
+1.  **Inicializa el entorno:**
     ```bash
-    agents-cli install
+    # Utiliza el script para resolver todo automáticamente:
+    ./setup.sh
     ```
 
-2.  **Prueba el agente de forma directa en terminal con el simulador:**
+2.  **Prueba el agente de forma directa en terminal:**
     ```bash
-    uv run python tests/unit/test_agent_local.py
+    uv run adk run app
     ```
 
 3.  **Prueba interactiva web:**
