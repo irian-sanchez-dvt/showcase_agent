@@ -221,11 +221,19 @@ if env_url:
     logger.info("URL de conexión del agente partner cargada de forma segura desde .env local.")
 
 # Instantiate the RemoteA2aAgent using Google ADK native A2A support
-remote_partner_agent = RemoteA2aAgent(
-    name="partner_agent",
-    agent_card=AgentCard(**card_data), # Pass instantiated AgentCard object directly
-    description="Agente remoto colaborador (partner) capaz de resolver consultas especializadas y delegar subtareas operativas.",
-)
+# Only instantiate if a real URL is configured (not the placeholder)
+_partner_url = card_data.get("url", "")
+_partner_configured = _partner_url and "your-partner-agent" not in _partner_url
+
+if _partner_configured:
+    remote_partner_agent = RemoteA2aAgent(
+        name="partner_agent",
+        agent_card=AgentCard(**card_data),
+        description="Agente remoto colaborador (partner) capaz de resolver consultas especializadas y delegar subtareas operativas.",
+    )
+else:
+    remote_partner_agent = None
+    logger.info("⚠️ PARTNER_AGENT_URL no configurada — herramienta A2A desactivada.")
 
 
 # ---------------------------------------------------------------------------
@@ -338,14 +346,15 @@ async def init_session_state(callback_context: CallbackContext, **kwargs) -> Non
         
     # Cargar y sobrescribir la configuración remota desde GCS en caliente para recuperar
     # la URL real del agente partner (OIDC/A2A) sin depender de variables .env locales en la nube
-    try:
-        gcs_config = load_gcs_config()
-        partner_url = gcs_config.get("PARTNER_AGENT_URL") or os.getenv("PARTNER_AGENT_URL")
-        if partner_url:
-            remote_partner_agent._agent_card.url = partner_url
-            logger.info(f"URL de conexión A2A de partner inyectada con éxito: {partner_url}")
-    except Exception as e:
-        logger.error(f"Fallo al inyectar la URL dinámica de partner: {e}")
+    if remote_partner_agent:
+        try:
+            gcs_config = load_gcs_config()
+            partner_url = gcs_config.get("PARTNER_AGENT_URL") or os.getenv("PARTNER_AGENT_URL")
+            if partner_url:
+                remote_partner_agent._agent_card.url = partner_url
+                logger.info(f"URL de conexión A2A de partner inyectada con éxito: {partner_url}")
+        except Exception as e:
+            logger.error(f"Fallo al inyectar la URL dinámica de partner: {e}")
         
     logger.info("Session state initialized.")
 
@@ -389,7 +398,7 @@ root_agent = Agent(
     instruction=base_instruction, # Arranca con la instrucción base; las skills se inyectan dinámicamente en init_session_state
     tools=[
         generic_tool,
-        AgentTool(remote_partner_agent),
+        *([AgentTool(remote_partner_agent)] if remote_partner_agent else []),
         generic_mcp_tool,  # Herramienta remota genérica de MCP
     ],
     before_agent_callback=init_session_state,
