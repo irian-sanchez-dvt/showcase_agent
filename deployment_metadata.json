@@ -1,6 +1,0 @@
-{
-  "remote_agent_runtime_id": "projects/<your-gcp-project-number>/locations/europe-west1/reasoningEngines/<your-reasoning-engine-id>",
-  "deployment_target": "agent_runtime",
-  "is_a2a": false,
-  "deployment_timestamp": "2026-06-17T17:06:48.775042"
-}

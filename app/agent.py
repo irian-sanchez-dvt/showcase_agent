@@ -21,10 +21,9 @@ import google.auth
 from google.adk.agents import Agent
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from google.adk.apps import App
-from google.adk.models import Gemini
+from google.adk.models.lite_llm import LiteLlm
 from google.adk.tools import AgentTool
 from google.adk.agents.callback_context import CallbackContext
-from google.genai import types
 from a2a.types import AgentCard
 
 # Load local environment variables from .env file if present
@@ -46,11 +45,11 @@ for env_path in possible_env_paths:
         except Exception:
             pass
 
-# Set up GCP and Vertex AI environment variables
-_, project_id = google.auth.default()
-os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project_id)
-os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
+# Set up GCP environment variables (solo necesario si se usa Vertex AI)
+if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() == "true":
+    _, project_id = google.auth.default()
+    os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project_id)
+    os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -166,81 +165,78 @@ def load_gcs_config() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 1. LOCAL & REMOTE FLEET SCHEDULE SKILL (read_production_schedule)
+# 1. TEMPLATE CUSTOM TOOL (generic_tool)
 # ---------------------------------------------------------------------------
-def read_production_schedule() -> dict:
-    """Consulta la flota activa de contenedores y sus cronogramas de arribo.
+def generic_tool(param: str) -> str:
+    """Genera un resumen conciso del texto proporcionado por el usuario.
 
-    En modo online lee de GCS; en modo offline de forma inmediata lee del disco local.
+    Args:
+        param: El texto a resumir (puede ser un párrafo, artículo o cualquier contenido de texto).
 
     Returns:
-        dict: Un diccionario JSON con el estado de la operación y el listado de contenedores en la flota.
+        str: Un resumen estructurado con las ideas principales del texto.
     """
-    if not IS_OFFLINE:
-        bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
-        blob_name = "production_schedule.json"
-        
-        # Intento de cargar dinámicamente desde GCS en la nube
-        try:
-            from google.cloud import storage
-            storage_client = storage.Client()
-            bucket = storage_client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
-            if blob.exists():
-                data_text = blob.download_as_text(encoding="utf-8")
-                return {"status": "success", "containers": json.loads(data_text), "source": "GCS"}
-        except Exception as e:
-            logger.error(f"Fallo al leer archivo de cronograma en GCS: {str(e)}")
-        
-    # Fallback local / Modo Offline directo
-    possible_paths = [
-        "production_schedule.json",
-        "../production_schedule.json",
-        os.path.join(os.path.dirname(__file__), "..", "production_schedule.json"),
-        os.path.join(os.path.dirname(__file__), "production_schedule.json"),
+    # TODO: [EJERCICIO] Sustituye esta implementación por la lógica personalizada de tu agente.
+    # Por ejemplo: llamar a una API, consultar una base de datos, ejecutar un cálculo, etc.
+    logger.info(f"⚙️ [generic_tool] Resumiendo texto de {len(param)} caracteres.")
+
+    if not param or not param.strip():
+        return "Error: el parámetro de texto está vacío. Proporciona un texto para resumir."
+
+    words = param.split()
+    word_count = len(words)
+    sentence_count = param.count('.') + param.count('!') + param.count('?')
+    # Extractive summary: take first and last sentence as key ideas
+    sentences = [s.strip() for s in param.replace('!', '.').replace('?', '.').split('.') if s.strip()]
+    key_ideas = sentences[:2] if len(sentences) >= 2 else sentences
+
+    summary_lines = [
+        f"📝 **Resumen del texto:**",
+        f"- Longitud: {word_count} palabras, {sentence_count} oraciones.",
+        f"- Ideas principales extraídas:",
     ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    logger.info("Cronograma de producción leído del disco local (Modo Local/Fallback).")
-                    return {"status": "success", "containers": data, "source": "local"}
-            except Exception:
-                pass
-                
-    return {"status": "error", "message": "No se pudo encontrar el archivo de cronograma en GCS ni en local."}
+    for idea in key_ideas:
+        summary_lines.append(f"  • {idea}.")
+
+    return "\n".join(summary_lines)
 
 
 # ---------------------------------------------------------------------------
-# 2. REMOTE LOGISTICS A2A AGENT INTEGRATION (Agent-to-Agent Skill)
+# 2. REMOTE AGENT COOPERATIVE INTEGRATION (Agent-to-Agent Skill)
 # ---------------------------------------------------------------------------
-# Resolve the path to our local high-fidelity agent card
+# Resolve the path to our local partner agent card
 agent_card_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "logistics_agent_card.json")
+    os.path.join(os.path.dirname(__file__), "partner_agent_card.json")
 )
 
 # Load the JSON and override the connection URL dynamically from environment
 with open(agent_card_path, "r", encoding="utf-8") as f:
     card_data = json.load(f)
 
-# Override with private logistics URL from .env securely if available locally
-env_url = os.getenv("LOGISTICS_AGENT_URL")
+# Override with private partner agent URL from .env securely if available locally
+env_url = os.getenv("PARTNER_AGENT_URL")
 if env_url:
     card_data["url"] = env_url
-    logger.info("URL de conexión del agente de logística cargada de forma segura desde .env local.")
+    logger.info("URL de conexión del agente partner cargada de forma segura desde .env local.")
 
 # Instantiate the RemoteA2aAgent using Google ADK native A2A support
-remote_logistics_agent = RemoteA2aAgent(
-    name="logistics_agent",
-    agent_card=AgentCard(**card_data), # Pass instantiated AgentCard object directly
-    description="Agente remoto de logística marítima capaz de rastrear contenedores específicos por ID (track_by_id) y realizar consultas complejas sobre la flota, rutas y retrasos en BigQuery (query_logistics).",
-)
+# Only instantiate if a real URL is configured (not the placeholder)
+_partner_url = card_data.get("url", "")
+_partner_configured = _partner_url and "your-partner-agent" not in _partner_url
+
+if _partner_configured:
+    remote_partner_agent = RemoteA2aAgent(
+        name="partner_agent",
+        agent_card=AgentCard(**card_data),
+        description="Agente remoto colaborador (partner) capaz de resolver consultas especializadas y delegar subtareas operativas.",
+    )
+else:
+    remote_partner_agent = None
+    logger.info("⚠️ PARTNER_AGENT_URL no configurada — herramienta A2A desactivada.")
 
 
 # ---------------------------------------------------------------------------
-# 3. WEATHER MCP SERVER INTEGRATION (get_port_weather)
+# 3. GENERIC REMOTE MCP SERVER INTEGRATION (generic_mcp_tool)
 # ---------------------------------------------------------------------------
 import subprocess
 
@@ -271,50 +267,46 @@ def get_google_id_token(audience: str) -> str:
             logger.warning(f"No se pudo generar el ID Token localmente para el MCP: {local_err}")
             return ""
 
-def get_port_weather(port: str) -> str:
-    """Checks the actual real-time weather at a specific port of origin using global weather APIs to assess meteorological hazards for maritime transport.
+def generic_mcp_tool(query: str) -> str:
+    """Checks the remote MCP database for a specific query to fetch real-time operational data.
 
     Args:
-        port: The port city and country name (e.g., Bilbao, ES, Buenos Aires, AR, Vancouver, CA).
+        query: The search query or identifier (e.g., 'consulta_a', 'consulta_b').
 
     Returns:
-        str: El reporte meteorológico detallado en castellano y el nivel de riesgo de transporte terrestre/marítimo.
+        str: El reporte de datos detallado en castellano y el estado de la operación.
     """
     fallback_offline_data = {
-      "buenos aires, ar": { "weather": "Sunny, calm seas.", "risk": "LOW" },
-      "bilbao, es": { "weather": "Severe storm, gale-force winds, heavy swells.", "risk": "HIGH" },
-      "felixstowe, uk": { "weather": "Dense fog, restricted visibility.", "risk": "MEDIUM" },
-      "jeddah, sa": { "weather": "Sunny, high temperatures, calm seas.", "risk": "LOW" },
-      "busan, kr": { "weather": "Partly cloudy, light breeze.", "risk": "LOW" },
-      "noumea, nc": { "weather": "Tropical depression nearby, rough seas, windy.", "risk": "MEDIUM" },
-      "callao, pe": { "weather": "Clear sky, moderate currents.", "risk": "LOW" },
-      "tangier, ma": { "weather": "Clear, mild winds.", "risk": "LOW" },
-      "vancouver, ca": { "weather": "Heavy rainfall and strong offshore winds.", "risk": "HIGH" }
+      "consulta_a": { "data": "Detalles completos de la consulta A.", "status": "PROCESADO" },
+      "consulta_b": { "data": "Detalles completos de la consulta B.", "status": "PENDIENTE" },
+      "consulta_c": { "data": "Detalles completos de la consulta C.", "status": "EN_CURSO" }
     }
 
     # 1. Si OFFLINE_MODE es true, consultamos de forma 100% local sin red
     if IS_OFFLINE:
-        logger.info("📡 [MODO OFFLINE] Resolviendo el clima del puerto localmente...")
+        logger.info("📡 [MODO OFFLINE] Resolviendo la consulta MCP localmente...")
         # Intento de llamar a un servidor Node local ejecutándose en el puerto 3000
         try:
-            response = requests.post("http://localhost:3000/get_port_weather", json={"port": port}, timeout=2)
+            response = requests.post("http://localhost:3000/generic_mcp_tool", json={"query": query}, timeout=2)
             if response.status_code == 200:
                 return response.json().get("text", "No se pudo recuperar el reporte local.")
         except Exception:
             pass
             
         # Fallback instantáneo en Python puro si no hay servidor local corriendo (Demo Blindada)
-        clean_key = port.lower().strip()
-        matched_info = { "weather": "Partly cloudy, calm seas.", "risk": "LOW" }
+        clean_key = query.lower().strip()
+        matched_info = { "data": f"Resultado simulado local para '{query}'.", "status": "ÉXITO" }
         for k, val in fallback_offline_data.items():
             if k in clean_key or clean_key in k:
                 matched_info = val
                 break
-        return f"Port Location: {port}. [OFFLINE MOCK DATA] {matched_info['weather']} Transport risk evaluation is: {matched_info['risk']}."
+        return f"Consulta: {query}. [OFFLINE MOCK DATA] {matched_info['data']} El estado de la operación es: {matched_info['status']}."
 
     # 2. Modo Producción Remoto en la Nube (Cloud Run)
-    mcp_audience = "https://weather-mcp-server-239233954615.europe-west1.run.app"
-    mcp_url = f"{mcp_audience}/get_port_weather"
+    mcp_audience = os.getenv("MCP_SERVER_URL", "")
+    if not mcp_audience:
+        return "Error: MCP_SERVER_URL no está configurada. Define la variable en tu archivo .env apuntando a tu servidor MCP desplegado en Cloud Run."
+    mcp_url = f"{mcp_audience}/generic_mcp_tool"
     
     # Obtener el token de identidad para pasar la seguridad IAM de Cloud Run de forma segura
     id_token = get_google_id_token(mcp_audience)
@@ -323,93 +315,17 @@ def get_port_weather(port: str) -> str:
         headers["Authorization"] = f"Bearer {id_token}"
         
     try:
-        response = requests.post(mcp_url, json={"port": port}, headers=headers, timeout=10)
+        response = requests.post(mcp_url, json={"query": query}, headers=headers, timeout=10)
         if response.status_code == 200:
-            return response.json().get("text", "No se pudo recuperar el reporte de clima.")
+            return response.json().get("text", "No se pudo recuperar el reporte desde el MCP.")
         else:
-            return f"Error al conectar con el microservicio de clima (HTTP {response.status_code}): {response.text}"
+            return f"Error al conectar con el servidor MCP (HTTP {response.status_code}): {response.text}"
     except Exception as e:
-        return f"Error de red al conectar con el microservicio de clima en Cloud Run: {str(e)}"
+        return f"Error de red al conectar con el servidor MCP remoto en Cloud Run: {str(e)}"
 
 
 # ---------------------------------------------------------------------------
-# 4. REMOTE GCS DISK INFRASTRUCTURE TOOL (save_markdown_report)
-# ---------------------------------------------------------------------------
-def save_markdown_report(filename: str, content: str) -> dict:
-    """Guarda un reporte o archivo de texto formateado en el disco local y lo sube de forma pública a Google Cloud Storage.
-
-    Args:
-        filename: El nombre del archivo a crear o guardar (ej: 'reporte_clima_bilbao.md').
-        content: El contenido de texto completo formateado en Markdown que se escribirá en el archivo.
-
-    Returns:
-        dict: El estado de la operación, la ruta del archivo local y el enlace de descarga en GCS.
-    """
-    clean_name = os.path.basename(filename)
-    
-    # 1. Guardado Local (Consistencia y Testing)
-    try:
-        reports_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "reports")
-        )
-        os.makedirs(reports_dir, exist_ok=True)
-        
-        filepath = os.path.join(reports_dir, clean_name)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-    except Exception as e:
-        logger.warning(f"No se pudo guardar localmente el reporte: {e}")
-        filepath = "local_save_failed"
-
-    # 2. Si estamos en modo offline, omitimos subir a GCS y retornamos de inmediato éxito local
-    if IS_OFFLINE:
-        logger.info("📡 [MODO OFFLINE] Reporte climático guardado localmente con éxito.")
-        return {
-            "status": "success",
-            "message": "Reporte climático guardado con éxito en disco local.",
-            "filepath": filepath,
-            "filename": clean_name,
-            "download_url": "No disponible (Modo Local/Offline)"
-        }
-
-    # 3. Subida a Google Cloud Storage con Generación de Enlace de Descarga (Producción)
-    try:
-        from google.cloud import storage
-        bucket_name = os.getenv("GCS_SKILLS_BUCKET", "dvt-sp-agentspace-factory-skills")
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        
-        # Subimos el archivo a la carpeta reports/ del bucket
-        gcs_blob_path = f"reports/{clean_name}"
-        blob = bucket.blob(gcs_blob_path)
-        
-        # Configuramos el tipo de contenido Markdown y codificación UTF-8 para que el navegador lo muestre bien
-        blob.upload_from_string(content, content_type="text/markdown; charset=utf-8")
-        
-        # Generamos la URL de descarga directa de GCS
-        public_url = f"https://storage.googleapis.com/{bucket_name}/{gcs_blob_path}"
-        logger.info(f"Reporte climático subido exitosamente a GCS: {public_url}")
-        
-        return {
-            "status": "success",
-            "message": "Reporte climático guardado exitosamente en Google Cloud Storage.",
-            "filepath": filepath,
-            "filename": clean_name,
-            "download_url": public_url
-        }
-    except Exception as e:
-        logger.error(f"Fallo al guardar el reporte en GCS: {str(e)}")
-        return {
-            "status": "success",  # Retornamos success local si falla GCS para ser resilientes en desarrollo local offline
-            "message": "Reporte climático guardado en disco local (GCS no disponible).",
-            "filepath": filepath,
-            "filename": clean_name,
-            "download_url": "No disponible (Offline)"
-        }
-
-
-# ---------------------------------------------------------------------------
-# 5. CALLBACKS FOR OBSERVABILITY & SESSION STATE
+# 4. CALLBACKS FOR OBSERVABILITY & SESSION STATE
 # ---------------------------------------------------------------------------
 async def init_session_state(callback_context: CallbackContext, **kwargs) -> None:
     """Callback triggered before agent execution to initialize and maintain session-level context."""
@@ -428,17 +344,18 @@ async def init_session_state(callback_context: CallbackContext, **kwargs) -> Non
         logger.info("Habilidades cargadas con éxito e inyectadas en las instrucciones del agente.")
         
     # Cargar y sobrescribir la configuración remota desde GCS en caliente para recuperar
-    # la URL real del agente de logística (OIDC/A2A) sin depender de variables .env locales en la nube
-    try:
-        gcs_config = load_gcs_config()
-        logistics_url = gcs_config.get("LOGISTICS_AGENT_URL") or os.getenv("LOGISTICS_AGENT_URL")
-        if logistics_url:
-            remote_logistics_agent._agent_card.url = logistics_url
-            logger.info(f"URL de conexión A2A de logística inyectada con éxito: {logistics_url}")
-    except Exception as e:
-        logger.error(f"Fallo al inyectar la URL dinámica de logística: {e}")
+    # la URL real del agente partner (OIDC/A2A) sin depender de variables .env locales en la nube
+    if remote_partner_agent:
+        try:
+            gcs_config = load_gcs_config()
+            partner_url = gcs_config.get("PARTNER_AGENT_URL") or os.getenv("PARTNER_AGENT_URL")
+            if partner_url:
+                remote_partner_agent._agent_card.url = partner_url
+                logger.info(f"URL de conexión A2A de partner inyectada con éxito: {partner_url}")
+        except Exception as e:
+            logger.error(f"Fallo al inyectar la URL dinámica de partner: {e}")
         
-    logger.info(f"Session state initialized. Validated batches: {callback_context.state['validated_batches']}")
+    logger.info("Session state initialized.")
 
 
 async def before_tool_call(tool, args: dict, tool_context, **kwargs) -> dict | None:
@@ -454,34 +371,35 @@ async def after_tool_call(tool, args: dict, tool_context, tool_response, **kwarg
 
 
 # ---------------------------------------------------------------------------
-# 6. AGENT DEFINITION
+# 5. AGENT DEFINITION
 # ---------------------------------------------------------------------------
-base_instruction = """Eres un planificador de fábrica experto. Tu misión es validar si un lote de producción puede iniciarse.
+base_instruction = """Eres un asistente virtual experto y proactivo diseñado utilizando el Google Agent Development Kit (ADK).
 
-Para lograr esto, debes seguir este procedimiento paso a paso de forma rigurosa:
-1. Utiliza la herramienta `read_production_schedule` para buscar el contenedor solicitado en el cronograma local de Google Cloud Storage.
-2. **Lógica de Búsqueda de Contenedor:**
-   - **Si encuentras el contenedor en el cronograma local:** identifica su puerto de origen (o 'pol'). Luego, consulta el clima de dicho puerto utilizando la herramienta `get_port_weather` para evaluar riesgos de transporte. También debes llamar a la herramienta `logistics_agent` (pasando el ID en el parámetro `request`, ej: `logistics_agent(request="CMDU4651065")`) para obtener su contenido y estado de aduanas.
-   - **Si NO encuentras el contenedor en el cronograma local:** no te detengas. Llama de inmediato a la herramienta `logistics_agent` pasando el ID del contenedor como argumento del parámetro `request` (ej: `logistics_agent(request="CMDU4651065")` o `logistics_agent(request="Rastrea el ID CMDU4651065")`) para que el agente remoto busque el contenedor en su base de datos global. Si el agente remoto responde con los detalles y el puerto de origen (pol), consulta el clima de ese puerto con la herramienta `get_port_weather`.
-3. Genera una recomendación final muy detallada en español sobre si el lote de producción puede iniciarse o si debe ser demorado, basándote exactamente en la información recolectada de las herramientas anteriores. Justifica tu decisión con los datos obtenidos.
+Tu misión es ayudar a resolver las consultas del usuario utilizando de forma inteligente tu catálogo de herramientas.
 
-**Regla de Seguridad Crítica:**
-No inventes datos bajo ninguna circunstancia. Si el contenedor no está en el cronograma local ni el agente de logística tiene registro de él (es decir, la herramienta `logistics_agent` no devuelve datos válidos o indica que no existe), indica que no es posible iniciar el lote de producción por falta de información y detalla qué herramientas consultaste.
+Sigue este protocolo de actuación de forma rigurosa:
+1. Si la consulta del usuario requiere información o datos que residen en nuestro servidor MCP remoto, utiliza la herramienta `generic_mcp_tool` para obtener datos precisos y reales.
+2. Si la consulta requiere interactuar con nuestro socio o agente remoto colaborador, utiliza la herramienta `partner_agent` describiendo claramente lo que necesitas en la petición de texto.
+3. Para otras tareas personalizadas o lógicas a medida, utiliza la herramienta `generic_tool`.
+4. Combina la información recolectada de tus herramientas de manera coherente y redacta una respuesta final clara, detallada y profesional en castellano.
+
+**Regla de Seguridad:**
+No inventes datos que no hayan sido proporcionados explícitamente por las herramientas. Si alguna herramienta de consulta falla, infórmalo de manera transparente al usuario.
 """
 
 root_agent = Agent(
     name="factory_planner",
-    model=Gemini(
-        model="gemini-2.5-flash",
-        retry_options=types.HttpRetryOptions(attempts=3),
+    model=LiteLlm(
+        model=os.getenv("ANTHROPIC_MODEL", "anthropic/claude-sonnet-4-5"),
+        api_base=os.getenv("ANTHROPIC_BASE_URL"),
+        api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
     ),
-    description="Planificador de fábrica experto que valida si un lote de producción puede iniciarse. Cruza datos de cronogramas locales de flota, clima real de puertos, y consulta detalles de carga vía protocolo A2A.",
+    description="Asistente planificador inteligente que cruza datos remotos mediante un servidor MCP y colabora de forma remota mediante protocolo A2A.",
     instruction=base_instruction, # Arranca con la instrucción base; las skills se inyectan dinámicamente en init_session_state
     tools=[
-        read_production_schedule,
-        AgentTool(remote_logistics_agent),
-        get_port_weather,  # Herramienta climática remota que se comunica de forma autenticada con el microservicio MCP en Cloud Run
-        save_markdown_report,  # Herramienta de GCS que guarda el reporte localmente y lo sube con URL pública de descarga a Google Cloud Storage
+        generic_tool,
+        *([AgentTool(remote_partner_agent)] if remote_partner_agent else []),
+        generic_mcp_tool,  # Herramienta remota genérica de MCP
     ],
     before_agent_callback=init_session_state,
     before_tool_callback=before_tool_call,
@@ -489,7 +407,7 @@ root_agent = Agent(
 )
 
 # ---------------------------------------------------------------------------
-# 7. APP DEFINITION (adkapp pattern)
+# 6. APP DEFINITION (adkapp pattern)
 # ---------------------------------------------------------------------------
 app = App(
     root_agent=root_agent,

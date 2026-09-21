@@ -1,172 +1,227 @@
-# factory-planner (Planificador de Fábrica)
+# factory-planner boilerpate (Boilerplate de Agente Inteligente)
 
-Agente inteligente orquestador de cadena de suministro basado en ReAct utilizando el **Google Agent Development Kit (ADK)** y compatible con el protocolo **Agent-to-Agent (A2A)**.
+Este repositorio es un **boilerplate (plantilla de inicio)** para construir agentes inteligentes orquestadores basados en ReAct utilizando el **Google Agent Development Kit (ADK)** y listos para interactuar mediante el protocolo **Agent-to-Agent (A2A)** y servidores **Model Context Protocol (MCP)** basándonos en el agente mostrado en la preparación del jueves 18.
+
+Está diseñado específicamente como un esqueleto inicial para talleres y sesiones de aprendizaje, listo para ser desplegado y ejecutado en **Google Cloud Shell Editor**.
 
 ---
 
 ## ¿Qué hace este agente?
 
-`factory_planner` es un agente experto diseñado para validar de manera inteligente si un lote de producción industrial puede iniciarse. Su toma de decisiones se basa rigurosamente en la combinación de tres coordenadas de información obtenidas en tiempo real:
+`factory_planner` es un agente experto genérico diseñado como una plantilla estructurada de ReAct. Su toma de decisiones demuestra la combinación de tres coordenadas de información que los asistentes del taller pueden expandir:
 
-1.  **Cronogramas de la Flota Local (`production_schedule.json`):** Consulta un archivo JSON local (sincronizado con datos reales de la tabla de BigQuery `dvt-sp-agentspace.dev_dataset.containers`) para descubrir qué contenedores están en ruta, sus puertos de origen (pol), puertos de destino (pod), fechas estimadas (eta) y transportistas (carriers).
-2.  **Riesgo Climático en Tiempo Real mediante MCP (`get_port_weather`):** Llama a un servidor del protocolo **Model Context Protocol (MCP)** desarrollado en Node.js que realiza peticiones HTTP en tiempo real a la API meteorológica global de **wttr.in** para evaluar de forma dinámica si existen tormentas, vendavales o alertas climáticas que pongan en peligro el transporte marítimo desde el puerto de carga.
-3.  **Detalles de Carga Avanzados vía A2A (`logistics_agent`):** Utiliza la interconexión nativa de A2A de Google ADK para comunicarse de manera remota con el agente de logística **`LogisticsFix`** (desplegado en Cloud Run). El agente resuelve si el contenedor con materia prima tiene sus trámites de aduana aprobados, peso correcto y contenido apto.
-
-**Regla de Oro:** Basado en estos tres puntos, el planificador genera una recomendación final detallada en castellano. Si alguna de las herramientas de consulta falla o no tiene conexión, el agente **nunca inventa datos** y te lo comunicará de manera transparente.
+1.  **Herramientas Locales a Medida (`generic_tool`):** Una función local de Python que, en su estado inicial, resume texto de forma extractiva. **Es el principal punto de ejercicio del taller:** debes sustituir su lógica por la herramienta personalizada de tu agente (llamada a una API, cálculo, consulta a base de datos, etc.).
+2.  **Servidor MCP Remoto (`generic_mcp_tool`):** Llama a **tu propio servidor MCP** desplegado en Cloud Run para realizar consultas estructuradas de forma segura. Debes desplegar el servidor incluido en `mcp-server/` (o el tuyo propio) y apuntar la variable `MCP_SERVER_URL` a su URL.
+3.  **Colaboración Remota vía A2A (`partner_agent`):** Utiliza la interconexión nativa de A2A de Google ADK para comunicarse de manera remota con otros agentes del ecosistema y delegar tareas especializadas de forma transparente.
 
 ---
 
-## 🔌 Detalle del Servidor MCP: Envolviendo la Web para el LLM
+## 📁 Estructura del Proyecto y Carpetas
 
-En este caso, el **servidor MCP** se ha definido como un **"wrapper" (envolvedor) de APIs o Webs**. Este proyecto implementa un servidor MCP real en **Node.js** que envuelve la API meteorológica global de **wttr.in** y la traduce al estándar abierto de comunicación JSON-RPC 2.0.
+A continuación se detalla qué contiene cada carpeta del proyecto y para qué sirve en el desarrollo de tu agente:
 
-### ¿Por qué Gemini necesita que hagamos este Wrapper (MCP)?
-Un modelo de lenguaje (como Gemini 2.5 Flash) es inteligente pero tiene limitaciones físicas en producción:
-1.  **Sin navegación libre:** No queremos que navegue por internet de forma autónoma para buscar el clima pues podría alucinar y/o incurrir en un gasto de tokens superfluo.
-2.  **Saturación de Contexto:** Las APIs meteorológicas devuelven JSONs enormes con miles de líneas de datos brutos. Enviar todo ese JSON al LLM desperdicia tokens y ralentiza la respuesta. El MCP filtra la información y envía solo los parámetros clave (Temperatura, Viento, Humedad).
-3.  **Lógica y Fórmulas Locales:** El LLM no sabe calcular de forma determinista si una racha de viento de 45 km/h representa un peligro alto para un buque portacontenedores. **Nuestro servidor MCP de Node.js procesa las métricas reales y calcula el nivel de riesgo de transporte de forma matemática**, entregándole al LLM el resultado ya masticado (`LOW`, `MEDIUM`, `HIGH`).
+### 1. `app/` (Código Principal del Agente)
+Esta es la carpeta más importante, donde residirá toda la lógica de inteligencia de tu agente:
+*   `agent.py`: El punto de entrada principal. Aquí se definen las instrucciones de comportamiento (prompt del sistema), se registran los callbacks de observabilidad, se cargan los esquemas A2A y se instancian las herramientas del agente. **Contiene un `TODO: [EJERCICIO]` en `generic_tool` y en el servidor MCP listo para que lo personalices.**
+*   `agent_runtime_app.py`: Archivo estándar que actúa como envoltorio (wrapper) de FastAPI. Es necesario para empaquetar tu agente y permitir que se ejecute en **Agent Runtime (Reasoning Engines)** en Google Cloud de forma serverless.
+*   `partner_agent_card.json`: Fichero de manifiesto (Agent Card) en formato JSON. Describe las capacidades y los endpoints de conexión de un agente externo con el que tu agente puede hablar de forma nativa a través de A2A. **Actualiza la URL con la de tu agente partner.**
 
-### Los Tres Archivos de la Ingeniería MCP en el Proyecto:
-1.  **La Declaración (`mcp_config.json`):** El manifiesto en la raíz del proyecto que le indica a la ADK que debe levantar el subproceso de Node en Cloud Run:
-    ```json
-    "weather-server": { "command": "node", "args": [".../weather-server/index.js"] }
-    ```
-2.  **El Wrapper de Node.js (`weather-server/index.js`):** Escucha las peticiones por stdio utilizando JSON-RPC 2.0, realiza la petición HTTP real de red a `wttr.in` en tiempo real, clasifica el riesgo usando métricas meteorológicas en vivo, y cuenta con un fallback local resiliente en caso de desconexión.
-3.  **La Inyección de Habilidad en Python (`app/agent.py`):** Utiliza la clase `McpToolset` de Google ADK para conectar de manera transparente el subproceso de Node e inyectarle la habilidad climática `get_port_weather` directamente a la lista de herramientas de Gemini.
+### 2. `skills/` (Directorio de Habilidades Dinámicas)
+*   Contiene manuales e instrucciones expertas escritas en Markdown (ej: `weather_report_skill.md`).
+*   **¿Para qué sirve?** El agente lee dinámicamente estos archivos (vía GCS o disco local) en caliente durante la inicialización del chat y los inyecta en su prompt. Esto permite actualizar o añadir nuevas destrezas al agente en tiempo real sin redesplegar código.
+
+### 3. `mcp-server/` (Servidor MCP — Despliégalo tú)
+*   Implementa un servidor de **Model Context Protocol (MCP)** desarrollado en **Node.js** que se comunica vía HTTP/SSE utilizando JSON-RPC 2.0.
+*   **Tienes que desplegarlo tú** en Cloud Run (u otro servicio) y configurar su URL en la variable `MCP_SERVER_URL` de tu `.env`. El servidor incluido es una plantilla funcional con un `TODO: [EJERCICIO]` para que sustituyas la lógica de consulta por la de tu caso de uso.
+*   También puedes apuntar `MCP_SERVER_URL` a cualquier servidor MCP externo compatible.
+
+### 4. Archivos en la Raíz del Proyecto
+*   `setup.sh`: Script que prepara todo tu entorno de desarrollo en un solo paso (instalación de `uv`, `google-agents-cli`, dependencias del proyecto y login en GCP).
+*   `pyproject.toml` y `uv.lock`: Definen los requisitos del sistema y las dependencias de Python administradas por `uv`.
+*   `.env.example`: Plantilla de variables de entorno. Cópiala a `.env` y rellena tus valores reales.
 
 ---
 
-## 🗺️ Diagrama de Arquitectura del Agente
+## 🚀 Primeros Pasos en Google Cloud Shell Editor
 
-A continuación se muestra el flujo de orquestación técnica que realiza el agente `factory_planner` utilizando **Google ADK 2.1.0** para validar el lote de producción:
+> Estos pasos están pensados para ejecutarse íntegramente desde **Cloud Shell Editor** (editor.cloud.google.com). No necesitas instalar nada en tu máquina local.
 
-```mermaid
-graph TD
-    User([👤 Usuario <br> Gemini Enterprise]) -->|1. Consulta| RootAgent["🤖 Agente Planificador<br> (Agent Runtime)"]
+### Paso 0 — Abre el proyecto en Cloud Shell Editor
 
-    subgraph GCP_Cloud [GCP]
-        RootAgent -->|Carga/Lee/Escribe| GCS[(☁️ GCS Bucket<br>Skills, Schedules, Reportes)]
-        
-        RootAgent -->|3. Llama A2A| A2A[🚚 Agente Logística<br>Cloud Run]
-        RootAgent -->|4. Consulta Clima| MCP[🌦️ MCP Weather Server<br>Cloud Run]
-        
-        A2A --> BQ[(📊 BigQuery)]
-    end
+1. Ve a [shell.cloud.google.com/cloudshell/editor](https://shell.cloud.google.com/cloudshell/editor)
+2. Clona este repositorio en el terminal inferior:
 
-    %% Servicio externo fuera de GCP
-    MCP -->|API Fetch| Wttr[🌍 wttr.in Live API]
+```bash
+git clone --branch boilerplate --single-branch https://github.com/irian-sanchez-dvt/showcase_agent.git
+cd showcase_agent
+```
 
-    RootAgent -->|6. Respuesta| User
+3. En el menú **File → Open Folder**, abre la carpeta `showcase_agent` para verla en el explorador de ficheros.
+
+---
+
+### Paso 1 — Ejecuta el script de configuración
+
+El script instala `uv`, `google-agents-cli`, crea el `.env` inicial y autentica tu sesión con GCP:
+
+```bash
+bash setup.sh
+```
+
+Cuando te pida login, sigue el enlace que aparece en el terminal y pega el código de verificación. Al terminar, activa el entorno virtual:
+
+```bash
+source .venv/bin/activate
 ```
 
 ---
 
-## Estructura del Proyecto
+### Paso 2 — Obtén tu API key del proxy LiteLLM
 
-```
-factory-planner/
-├── app/                      # Código principal del agente
-│   ├── agent.py                 # Lógica de razonamiento, tools y callbacks del agente
-│   ├── agent_runtime_app.py      # Envoltorio del agente para Agent Runtime de GCP
-│   ├── logistics_agent_card.json # Agent Card del servicio remoto de Logística A2A
-│   └── app_utils/               # Utilidades de telemetría y tipado del ADK
-├── skills/                   # Directorio de Habilidades (Skills) Dinámicas en Markdown
-│   └── weather_report_skill.md  # Instrucciones expertas para generación de reportes climáticos
-├── weather-server/           # Servidor MCP de Clima Real (Node.js stdio)
-│   └── index.js                 # Manejador JSON-RPC 2.0 y consultas HTTP a wttr.in
-├── tests/                    # Pruebas unitarias, integración y evaluación
-├── DEPLOY_GCP.md             # Guía detallada para despliegue y registro en GCP
-├── GEMINI.md                 # Guía para el agente de desarrollo de IA (Gemini CLI/Antigravity)
-├── mcp_config.json           # Configuración del servidor MCP 
-├── production_schedule.json  # Datos locales de contenedores activos
-└── pyproject.toml            # Dependencias del proyecto Python
-```
+Este boilerplate usa **Claude** a través del proxy LiteLLM corporativo de MasOrange en lugar de llamar directamente a Vertex AI. Esto significa que no necesitas configurar credenciales de Gemini ni habilitar APIs de Vertex AI.
+
+Para obtener tu API key personal:
+
+1. Ve al canal de Slack **#cloud-ai-ngineering** y escribe `@Cloud AI-ngineering` para solicitar tu key.
+2. El bot responderá automáticamente con tu `ANTHROPIC_AUTH_TOKEN` personal (formato `sk-...`).
+3. La key expira en 90 días — renuévala de la misma forma.
+
+> Para más detalles sobre el proxy y configuraciones avanzadas consulta la documentación oficial:
+> **[Guía de configuración LiteLLM → idp.masstack.com](https://idp.masstack.com/docs/default/component/cloud-engineering/claude-code/litellm-setup/)**
 
 ---
 
-## 💡 Arquitectura de Habilidades (Skills) y Configuración en la Nube
+### Paso 3 — Configura tus variables de entorno
 
-Para demostrar las capacidades completas de **Google ADK 2.1.0** en entornos de gran escala, este proyecto implementa una arquitectura 100% serverless, desacoplada y orientada a la seguridad:
+El script ya ha creado el archivo `.env` a partir de `.env.example`. Ábrelo y rellena tus valores:
 
-*   **Habilidades Dinámicas desde Google Cloud Storage (GCS):**
-    *   Los manuales de habilidades (como `skills/weather_report_skill.md`) se almacenan de forma segura en el bucket **`gs://dvt-sp-agentspace-factory-skills`**.
-    *   **Lazy Loading asíncrono:** Al iniciar la conversación, el agente realiza una importación tardía diferida para descargar las habilidades de GCS en memoria de forma segura dentro del event loop de FastAPI.
-*   **Cronograma de Flota Dinámico en la Nube:**
-    *   La base de datos de contenedores activos se lee directamente desde **`gs://dvt-sp-agentspace-factory-skills/production_schedule.json`**.
-    *   **¡Súper dinámico!:** Puedes actualizar los barcos o puertos editando directamente el JSON en el bucket de GCS, y el agente en producción leerá los cambios de inmediato sin tener que realizar ningún despliegue de código.
-*   **Seguridad y Autenticación de Extremo a Extremo (OIDC Bearer Token):**
-    *   El servidor MCP del clima en **Cloud Run** está configurado de forma **100% privada** (`--no-allow-unauthenticated`).
-    *   Durante la ejecución del tool, el agente de Python genera dinámicamente un **OIDC Identity Token de Google** desde las credenciales por defecto de su Service Account (o gcloud en local) e inyecta la cabecera `Authorization: Bearer <TOKEN>` para autorizarse contra Cloud Run de forma segura.
-*   **Reportes Climáticos en la Nube con Enlace de Descarga Directo:**
-    *   La herramienta `save_markdown_report` sube de forma pública el reporte Markdown generado a la carpeta `/reports/` de tu bucket de GCS.
-    *   Retorna un enlace público clickeable (`download_url`). Gemini lee esta URL e **inyecta de forma nativa en el chat un botón de descarga directo** (ej: `[📥 Descargar Reporte en GCS](url_generada)`) para que el usuario pueda guardarlo en su PC con un solo clic.
+El script ya ha creado el archivo `.env` a partir de `.env.example`. Ábrelo en el editor y rellena tus valores reales:
+
+```bash
+# En el terminal de Cloud Shell
+nano .env
+# O ábrelo directamente desde el explorador de ficheros del editor
+```
+
+Variables clave en `.env`:
+
+| Variable | Descripción |
+| :--- | :--- |
+| `ANTHROPIC_AUTH_TOKEN` | Tu API key personal del proxy LiteLLM (del bot de Slack) |
+| `ANTHROPIC_BASE_URL` | URL del proxy: `https://llm.tools.cloud.masorange.es` |
+| `ANTHROPIC_MODEL` | Modelo a usar, por defecto `anthropic/claude-sonnet-4-5` |
+| `OFFLINE_MODE` | `true` para desarrollo local sin GCP, `false` para producción |
+| `GOOGLE_CLOUD_PROJECT` | ID de tu proyecto de GCP (ej: `mi-proyecto-123`) |
+| `MCP_SERVER_URL` | URL de tu servidor MCP desplegado en Cloud Run |
+| `PARTNER_AGENT_URL` | URL del agente partner remoto (A2A) |
+| `GCS_SKILLS_BUCKET` | Nombre del bucket GCS para habilidades y reportes |
+
+> **Tip:** Para encontrar tu Project ID ejecuta `gcloud config get-value project`.
 
 ---
 
-## 📡 Modo Offline / Local-First (Cero Configuración para Pruebas Rápidas)
+### Paso 4 — Prueba el agente en modo offline
 
-Este proyecto está diseñado para ser **Local-First**, permitiendo a cualquier desarrollador o probador ejecutar y validar todo el comportamiento del agente de forma **100% local y offline**, sin necesidad de configurar credenciales de Google Cloud ni instalar dependencias externas.
+Antes de desplegar nada en la nube, verifica que el agente arranca correctamente en modo local:
 
-### ¿Cómo activarlo?
-Simplemente configura la siguiente variable en tu archivo `.env`:
+```bash
+# Asegúrate de tener OFFLINE_MODE=true en tu .env
+uv run adk web --port 8080 --allow_origins "regex:.*" .
+```
+
+Cloud Shell abrirá automáticamente una ventana de preview (o puedes hacer clic en el icono **Web Preview → Preview on port 8080**). Deberías ver el playground del ADK y poder chatear con el agente.
+
+---
+
+### Paso 5 — Despliega tu servidor MCP en Cloud Run
+
+Con el agente funcionando en local, el siguiente paso es conectarlo a un servidor MCP real. Desde el terminal de Cloud Shell:
+
+```bash
+cd mcp-server
+gcloud run deploy my-mcp-server \
+  --source . \
+  --region europe-west1 \
+  --no-allow-unauthenticated
+```
+
+Cuando termine, copia la URL que aparece (`Service URL: https://my-mcp-server-xxxx.a.run.app`) y pégala en tu `.env`:
+
 ```env
-OFFLINE_MODE=true
+MCP_SERVER_URL=https://my-mcp-server-xxxx.a.run.app
+OFFLINE_MODE=false
 ```
 
-### ¿Qué hace el Modo Offline tras bambalinas?
-Cuando esta variable es `true`, el agente inteligente de Python activa un protocolo de contingencia local:
-1.  **Skills e Instrucciones locales:** En lugar de intentar conectarse a internet para descargar las habilidades de GCS, las lee de forma instantánea y local desde la carpeta `skills/`.
-2.  **Cronogramas Locales:** Bypassea GCS y lee el cronograma de barcos directamente desde el archivo local `production_schedule.json`.
-3.  **Simulación Climática Determinista:** El agente no requiere el microservicio de Cloud Run ni genera tokens de GCP. Consulta de forma interna un diccionario meteorológico local de alta fidelidad, respondiendo con el clima y el riesgo físico exacto al instante.
-4.  **Guardado Local:** Omite la subida a internet y guarda el informe Markdown físico en tu disco local dentro de la carpeta `reports/`.
+Vuelve a la raíz del proyecto:
+
+```bash
+cd ..
+```
+
+> **Ejercicio:** Antes de desplegar, abre `mcp-server/index.js` y sustituye el `TODO: [EJERCICIO]` en `getGenericDataLive` por la lógica real de tu caso de uso.
 
 ---
 
-## Requisitos Previos
+### Paso 6 — Despliega el agente en Agent Runtime (GCP)
 
-Antes de comenzar, asegúrate de tener instalado:
-*   **uv**: Gestor de paquetes de Python de alto rendimiento - [Instalar uv](https://docs.astral.sh/uv/getting-started/installation/)
-*   **agents-cli**: CLI oficial de agentes de Google - Instálalo ejecutando: `uv tool install google-agents-cli`
-*   **Google Cloud SDK**: Para los servicios e integraciones en la nube - [Instalar gcloud](https://cloud.google.com/sdk/docs/install)
-*   **Node.js (v18+)**: Para la ejecución del servidor meteorológico MCP.
+```bash
+agents-cli deploy
+```
+
+Cuando el deploy termine, registra el agente en Gemini Enterprise para que tu equipo pueda usarlo:
+
+```bash
+agents-cli publish gemini-enterprise
+```
 
 ---
 
-## Comandos del Proyecto
-
-Ejecuta estos comandos desde la carpeta raíz del proyecto (`factory-planner`):
+## 🛠️ Comandos Útiles del Proyecto
 
 | Comando | Descripción |
 | :--- | :--- |
-| `agents-cli install` | Instala todas las dependencias del proyecto en un entorno virtual aislado (`.venv`) usando `uv`. |
-| `uv run adk run app` | **Inicia el agente en modo consola interactiva** (ideal para pruebas locales rápidas). |
-| `uv run python tests/unit/test_agent_local.py` | Ejecuta la simulación local del agente de extremo a extremo probando GCS, OIDC y A2A en consola. |
-| `uv run adk web --port 8080 .` | Lanza el Web UI interactivo (Playground visual) directo de la ADK en el puerto `8080`. |
-| `uv run pytest tests/unit` | Ejecuta la suite de pruebas unitarias de las herramientas locales. |
-| `agents-cli deploy` | Empaqueta y despliega el agente en **Agent Runtime** de Google Cloud. |
-| `agents-cli publish gemini-enterprise` | Registra el agente y expone sus **skills** en la consola de **Gemini Enterprise**. |
+| `source .venv/bin/activate` | Activa el entorno virtual de Python en tu terminal. |
+| `uv run adk run app` | **Inicia tu agente en modo consola interactiva** (puedes chatear con él directamente en la terminal). |
+| `uv run adk web --port 8080 --allow_origins "regex:.*" .` | Lanza el Web UI interactivo (Playground visual) de la ADK en el puerto `8080`. |
+| `agents-cli deploy` | Empaqueta y despliega tu agente en **Agent Runtime** de Google Cloud. |
+| `agents-cli publish gemini-enterprise` | Registra el agente en la consola de **Gemini Enterprise** para que tu equipo pueda usarlo. |
 
 ---
 
-## Pruebas y Desarrollo Local
+## 🔧 Dónde personalizar tu agente
 
-1.  **Instala las dependencias:**
-    ```bash
-    agents-cli install
-    ```
+Hay tres puntos marcados con `TODO: [EJERCICIO]` en el código:
 
-2.  **Prueba el agente de forma directa en terminal con el simulador:**
-    ```bash
-    uv run python tests/unit/test_agent_local.py
-    ```
+### 1. `app/agent.py` — `generic_tool` (herramienta local)
+Esta función recibe un texto y actualmente devuelve un resumen extractivo básico. **Sustitúyela por la lógica de tu herramienta personalizada.**
 
-3.  **Prueba interactiva web:**
-    ```bash
-    uv run adk web --port 8080 .
-    ```
+```python
+def generic_tool(param: str) -> str:
+    # TODO: [EJERCICIO] Sustituye esta implementación por la lógica de tu agente.
+    ...
+```
+
+### 2. `mcp-server/index.js` — `getGenericDataLive` (herramienta MCP remota)
+Esta función es la que el servidor MCP ejecuta cuando el agente invoca `generic_mcp_tool`. Actualmente devuelve datos de ejemplo. **Conéctala a tu API o base de datos real.**
+
+```javascript
+async function getGenericDataLive(query) {
+  // TODO: [EJERCICIO] Implementar la consulta a una API real o base de datos.
+  ...
+}
+```
+
+### 3. `app/agent.py` — `base_instruction` (prompt del sistema)
+El prompt que define el comportamiento del agente. **Adáptalo al dominio de tu caso de uso.**
 
 ---
 
-## Despliegue en la Nube de Google (GCP)
+## 📡 Modo Offline / Local-First (Desarrollo Rápido)
 
-Toda la documentación técnica para realizar el despliegue del agente en **Reasoning Engines** y registrar de manera oficial sus **Skills** en **Gemini Enterprise Agent Platform** está documentada en el archivo [DEPLOY_GCP.md](./DEPLOY_GCP.md).
+Este boilerplate está preparado para ejecutarse en modo **Local-First**, permitiéndote probar todo el flujo de comportamiento de manera local y offline, sin necesidad de conectarse a internet o configurar credenciales de Google Cloud inicialmente.
+
+Para activarlo, asegúrate de tener configurado en tu archivo `.env` local:
+```env
+OFFLINE_MODE=true
+```
+Esto redirigirá la descarga de habilidades al disco local y simulará consultas al servidor MCP sin conexión de red.
